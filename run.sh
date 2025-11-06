@@ -448,9 +448,9 @@ function update_env_config()
         sed -i "s/KEEPALIVED_IMAGE=.*/KEEPALIVED_IMAGE=mvilla\/keepalived/g" ${curr_path}/.env
     fi
 
+    sed -i "s/ONE_NODE=.*/ONE_NODE=false/g" ${curr_path}/.env
     sed -i '/^CURR_PATH=/d' ${curr_path}/.env
     echo "CURR_PATH=${curr_path}" >> ${curr_path}/.env
-    echo "ONE_NODE=false" >> ${curr_path}/.env
 }
 
 function is_image_exist()

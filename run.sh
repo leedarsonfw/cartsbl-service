@@ -465,12 +465,12 @@ function is_image_exist()
 
 function pull_image()
 {
+    arch=$(uname -m)
     keepalived_img="osixia/keepalived:2.0.20"
-    if [ "aarch64"x == "${ARCH}"x ]; then
+    if [ "aarch64"x == "${arch}"x ]; then
         keepalived_img="mvilla/keepalived:arm64"
     fi
 
-    arch=$(uname -m)
     list="
 ${keepalived_img}
 portainer/portainer-ce:latest

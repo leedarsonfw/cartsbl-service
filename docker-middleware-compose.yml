@@ -1,0 +1,18 @@
+services:
+  sbl-middleware-srv:
+    image: leedarson/cartsbl_middleware:${ARCH}-V1.06.01
+    volumes:
+      - ${CURR_PATH}/storage/logs:/logs
+      - ${CURR_PATH}/storage/tmp:/tmp
+      - ${CURR_PATH}/stack/sbl_middleware.yaml:/etc/sbl_middleware.yaml
+    restart: always
+    stdin_open: true
+    tty: true
+    stop_signal: SIGINT
+    stop_grace_period: 5s
+    networks:
+      - sbl-middleware-network
+
+networks:
+  sbl-middleware-network:
+    driver: bridge

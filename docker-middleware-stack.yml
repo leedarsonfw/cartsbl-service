@@ -1,0 +1,24 @@
+version: '3.8'
+
+services:
+  sbl-middleware-srv:
+    image: leedarson/cartsbl_middleware:${ARCH}-V1.06.01
+    deploy:
+      mode: global
+    volumes:
+      - ${CURR_PATH}/storage/logs:/logs
+      - ${CURR_PATH}/storage/tmp:/tmp
+    configs:
+      - source: sbl-middleware-config
+        target: /etc/sbl_middleware.yaml
+    networks:
+      - sbl-middleware-net
+
+configs:
+  sbl-middleware-config:
+    external: true
+
+networks:
+  sbl-middleware-net:
+    driver: overlay
+    attachable: true

@@ -1,0 +1,31 @@
+services:
+  portainer:
+    image: portainer/portainer-ce:latest
+    container_name: portainer
+    restart: always
+    ports:
+      - "${PORTAINER_PORT}:${PORTAINER_PORT}/tcp"
+    volumes:
+      - /var/application/portainer/data:/data
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      - portainer-net
+
+  keepalived:
+    image: ${KEEPALIVED_IMAGE}
+    container_name: keepalived
+    restart: always
+    network_mode: host
+    cap_add:
+      - NET_ADMIN
+      - NET_BROADCAST
+      - NET_RAW
+    volumes:
+      - ./stack/keepalived-${NODE_ID}.conf:/usr/local/etc/keepalived/keepalived.conf
+      - /var/run/keepalived:/var/run/keepalived
+    depends_on:
+      - portainer
+
+networks:
+  portainer-net:
+    driver: bridge

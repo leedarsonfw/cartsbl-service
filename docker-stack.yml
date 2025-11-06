@@ -1,0 +1,343 @@
+services:
+  chirpstack:
+    image: leedarson/cartsbl:${ARCH}-v1.8.4
+    command: -c /etc/chirpstack
+    deploy:
+      mode: global
+    volumes:
+      - ${CURR_PATH}/configuration/chirpstack:/etc/chirpstack
+    environment:
+      - REDIS_HOST=${VIP}
+      - REDIS_PORT=${REDIS_FRONTEND_PORT}
+      - POSTGRESQL_HOST=${VIP}
+      - MQTT_BROKER_HOST=emqx
+      - MQTT_BROKER_PORT=${EMQX_PORT}
+    ports:
+      - target: ${CHIRPSTACK_PORT}
+        published: ${CHIRPSTACK_PORT}
+        protocol: tcp
+    networks:
+      - lorawan-net
+
+  chirpstack-gateway-bridge-basicstation:
+    image: chirpstack/chirpstack-gateway-bridge:4
+    command: -c /etc/chirpstack-gateway-bridge/chirpstack-gateway-bridge-basicstation-us915_1.toml
+    deploy:
+      mode: global
+    ports:
+      - target: ${CHIRPSTACK_GATEWAY_BRIDGE_PORT}
+        published: ${CHIRPSTACK_GATEWAY_BRIDGE_PORT}
+        protocol: tcp
+    volumes:
+      - ${CURR_PATH}/configuration/chirpstack-gateway-bridge:/etc/chirpstack-gateway-bridge
+    networks:
+      - lorawan-net
+
+  chirpstack-rest-api:
+    image: chirpstack/chirpstack-rest-api:4
+    command: --server chirpstack:${CHIRPSTACK_PORT} --bind 0.0.0.0:${CHIRPSTACK_REST_API_PORT} --insecure
+    deploy:
+      mode: global
+    ports:
+      - target: ${CHIRPSTACK_REST_API_PORT}
+        published: ${CHIRPSTACK_REST_API_PORT}
+        protocol: tcp
+    networks:
+      - lorawan-net
+
+  postgres-node-0:
+    image: bitnamilegacy/postgresql-repmgr:14.12.0
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.labels.node.id == 1
+    environment:
+      - POSTGRESQL_POSTGRES_PASSWORD=chirpstack
+      - POSTGRESQL_USERNAME=chirpstack
+      - POSTGRESQL_PASSWORD=chirpstack
+      - POSTGRESQL_DATABASE=chirpstack
+      - POSTGRES_USER=chirpstack
+      - POSTGRES_PASSWORD=chirpstack
+      - POSTGRES_DB=chirpstack
+      - REPMGR_USERNAME=chirpstack
+      - REPMGR_PASSWORD=chirpstack
+      - REPMGR_PRIMARY_HOST=${CLUSTER_NODE0_IP}
+      - REPMGR_PRIMARY_ROLE=primary
+      - REPMGR_PARTNER_NODES=${CLUSTER_NODE0_IP},${CLUSTER_NODE1_IP},${CLUSTER_NODE2_IP}
+      - REPMGR_NODE_NAME=postgres-node-0
+      - REPMGR_NODE_NETWORK_NAME=postgres-node-0
+      - REPMGRD_ENABLED=true
+      - REPMGRD_LISTEN_ADDRESS=0.0.0.0
+    volumes:
+      - ${CURR_PATH}/storage/postgresqldata-0:/bitnami/postgresql
+      - ${CURR_PATH}/configuration/postgresql/initdb:/docker-entrypoint-initdb.d
+    networks:
+      - lorawan-net
+
+  postgres-node-1:
+    image: bitnamilegacy/postgresql-repmgr:14.12.0
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.labels.node.id == 2
+    environment:
+      - POSTGRESQL_POSTGRES_PASSWORD=chirpstack
+      - POSTGRESQL_USERNAME=chirpstack
+      - POSTGRESQL_PASSWORD=chirpstack
+      - POSTGRESQL_DATABASE=chirpstack
+      - POSTGRES_USER=chirpstack
+      - POSTGRES_PASSWORD=chirpstack
+      - POSTGRES_DB=chirpstack
+      - REPMGR_USERNAME=chirpstack
+      - REPMGR_PASSWORD=chirpstack
+      - REPMGR_PRIMARY_HOST=${CLUSTER_NODE0_IP}
+      - REPMGR_PARTNER_NODES=${CLUSTER_NODE0_IP},${CLUSTER_NODE1_IP},${CLUSTER_NODE2_IP}
+      - REPMGR_NODE_NAME=postgres-node-1
+      - REPMGR_NODE_NETWORK_NAME=postgres-node-1
+    volumes:
+      - ${CURR_PATH}/storage/postgresqldata-1:/bitnami/postgresql
+    networks:
+      - lorawan-net
+
+  postgres-node-2:
+    image: bitnamilegacy/postgresql-repmgr:14.12.0
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.labels.node.id == 3
+    environment:
+      - POSTGRESQL_POSTGRES_PASSWORD=chirpstack
+      - POSTGRESQL_USERNAME=chirpstack
+      - POSTGRESQL_PASSWORD=chirpstack
+      - POSTGRESQL_DATABASE=chirpstack
+      - POSTGRES_USER=chirpstack
+      - POSTGRES_PASSWORD=chirpstack
+      - POSTGRES_DB=chirpstack
+      - REPMGR_USERNAME=chirpstack
+      - REPMGR_PASSWORD=chirpstack
+      - REPMGR_PRIMARY_HOST=${CLUSTER_NODE0_IP}
+      - REPMGR_PARTNER_NODES=${CLUSTER_NODE0_IP},${CLUSTER_NODE1_IP},${CLUSTER_NODE2_IP}
+      - REPMGR_NODE_NAME=postgres-node-2
+      - REPMGR_NODE_NETWORK_NAME=postgres-node-2
+    volumes:
+      - ${CURR_PATH}/storage/postgresqldata-2:/bitnami/postgresql
+    networks:
+      - lorawan-net
+
+  haproxy:
+    image: leedarson/haproxy:${ARCH}-V1.02.00
+    deploy:
+      mode: global
+    configs:
+      - source: haproxy-config
+        target: /usr/local/etc/haproxy/haproxy.cfg
+    environment:
+      - PGUSER=chirpstack
+      - PGPASSWORD=chirpstack
+      - PGDATABASE=chirpstack
+    ports:
+      - "${POSTGRES_PORT}:${POSTGRES_PORT}"
+      - "${REDIS_FRONTEND_PORT}:${REDIS_FRONTEND_PORT}"
+      - "${HAPROXY_PORT}:${HAPROXY_PORT}"
+    networks:
+      - lorawan-net
+
+  redis-node-0:
+    image: redis:7-alpine
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.labels.node.id == 1
+    command: ["redis-server", "/etc/redis/redis.conf"]
+    configs:
+      - source: redis-0-conf
+        target: /etc/redis/redis.conf
+    ports:
+      - target: ${REDIS_PORT}
+        published: ${REDIS_PORT}
+        protocol: tcp
+        mode: host
+    volumes:
+      - ${CURR_PATH}/storage/redisdata-0:/data
+    networks:
+      - lorawan-net
+
+  redis-node-1:
+    image: redis:7-alpine
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.labels.node.id == 2
+    command: ["redis-server", "/etc/redis/redis.conf"]
+    configs:
+      - source: redis-1-conf
+        target: /etc/redis/redis.conf
+    ports:
+      - target: ${REDIS_PORT}
+        published: ${REDIS_PORT}
+        protocol: tcp
+        mode: host
+    volumes:
+      - ${CURR_PATH}/storage/redisdata-1:/data
+    networks:
+      - lorawan-net
+
+  redis-node-2:
+    image: redis:7-alpine
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.labels.node.id == 3
+    command: ["redis-server", "/etc/redis/redis.conf"]
+    configs:
+      - source: redis-2-conf
+        target: /etc/redis/redis.conf
+    ports:
+      - target: ${REDIS_PORT}
+        published: ${REDIS_PORT}
+        protocol: tcp
+        mode: host
+    volumes:
+      - ${CURR_PATH}/storage/redisdata-2:/data
+    networks:
+      - lorawan-net
+
+  redis-sentinel-0:
+    image: redis:7-alpine
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.labels.node.id == 1
+    command:
+    - sh
+    - -c
+    - |
+      cp /etc/redis/sentinel.conf /tmp/sentinel.conf
+      exec redis-sentinel /tmp/sentinel.conf
+    configs:
+      - source: sentinel-0-conf
+        target: /etc/redis/sentinel.conf
+    ports:
+      - target: ${REDIS_SENTINEL_PORT}
+        published: ${REDIS_SENTINEL_PORT}
+        protocol: tcp
+        mode: host
+    networks:
+      - lorawan-net
+
+  redis-sentinel-1:
+    image: redis:7-alpine
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.labels.node.id == 2
+    command:
+    - sh
+    - -c
+    - |
+      cp /etc/redis/sentinel.conf /tmp/sentinel.conf
+      exec redis-sentinel /tmp/sentinel.conf
+    configs:
+      - source: sentinel-1-conf
+        target: /etc/redis/sentinel.conf
+    ports:
+      - target: ${REDIS_SENTINEL_PORT}
+        published: ${REDIS_SENTINEL_PORT}
+        protocol: tcp
+        mode: host
+    networks:
+      - lorawan-net
+
+  redis-sentinel-2:
+    image: redis:7-alpine
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.labels.node.id == 3
+    command:
+    - sh
+    - -c
+    - |
+      cp /etc/redis/sentinel.conf /tmp/sentinel.conf
+      exec redis-sentinel /tmp/sentinel.conf
+    configs:
+      - source: sentinel-2-conf
+        target: /etc/redis/sentinel.conf
+    ports:
+      - target: ${REDIS_SENTINEL_PORT}
+        published: ${REDIS_SENTINEL_PORT}
+        protocol: tcp
+        mode: host
+    networks:
+      - lorawan-net
+
+  emqx:
+    image: emqx/emqx:5.6.0
+    deploy:
+      mode: global
+      endpoint_mode: dnsrr
+    environment:
+      - EMQX_NAME:=emqx
+      - EMQX_ALLOW_ANONYMOUS=true
+      - EMQX_ZONE__EXTERNAL__ALLOW_ANONYMOUS=true
+      - EMQX_DASHBOARD__DEFAULT_USERNAME=admin
+      - EMQX_DASHBOARD__DEFAULT_PASSWORD=admin
+      - EMQX_CLUSTER__DISCOVERY_STRATEGY=dns
+      - EMQX_CLUSTER__DNS__NAME=tasks.emqx
+      - EMQX_NODE__COOKIE=secretcookie
+    ports:
+      - target: ${EMQX_PORT}
+        published: ${EMQX_PORT}
+        protocol: tcp
+        mode: host
+      - target: ${EMQX_WEB_PORT}
+        published: ${EMQX_WEB_PORT}
+        protocol: tcp
+        mode: host
+    networks:
+      - lorawan-net
+
+configs:
+  haproxy-config:
+    external: true
+
+  redis-0-conf:
+    external: true
+
+  redis-1-conf:
+    external: true
+
+  redis-2-conf:
+    external: true
+
+  sentinel-0-conf:
+    external: true
+
+  sentinel-1-conf:
+    external: true
+
+  sentinel-2-conf:
+    external: true
+
+networks:
+  lorawan-net:
+    driver: overlay
+    attachable: true

@@ -694,6 +694,9 @@ function network_clean()
 
 function one_node_start()
 {
+    if [ ! -d ${CURR_PATH}/storage/postgresqldata ]; then
+        sudo tar zxvf postgresqldata.tgz -C storage
+    fi
     ARCH=$(uname -m) docker compose -f docker-compose.yml up -d
 }
 

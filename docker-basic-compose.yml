@@ -4,7 +4,7 @@ services:
     container_name: portainer
     restart: always
     ports:
-      - "${PORTAINER_PORT}:${PORTAINER_PORT}/tcp"
+      - "${PORTAINER_PORT}:9000/tcp"
     volumes:
       - /var/application/portainer/data:/data
       - /var/run/docker.sock:/var/run/docker.sock

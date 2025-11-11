@@ -445,7 +445,7 @@ function update_env_config()
     if [ "aarch64"x == "${arch}"x ]; then
         sed -i "s/KEEPALIVED_IMAGE=.*/KEEPALIVED_IMAGE=mvilla\/keepalived:arm64/g" ${curr_path}/.env
     else
-        sed -i "s/KEEPALIVED_IMAGE=.*/KEEPALIVED_IMAGE=mvilla\/keepalived/g" ${curr_path}/.env
+        sed -i "s/KEEPALIVED_IMAGE=.*/KEEPALIVED_IMAGE=osixia\/keepalived:2.0.20/g" ${curr_path}/.env
     fi
 
     sed -i "s/ONE_NODE=.*/ONE_NODE=false/g" ${curr_path}/.env

@@ -16,7 +16,7 @@ services:
       - REDIS_PORT=${REDIS_PORT}
       - POSTGRESQL_HOST=postgres
     ports:
-      - "${CHIRPSTACK_PORT}:${CHIRPSTACK_PORT}"
+      - "${CHIRPSTACK_PORT}:8080"
     deploy:
       resources:
         limits:
@@ -28,7 +28,7 @@ services:
     restart: unless-stopped
     command: -c /etc/chirpstack-gateway-bridge/chirpstack-gateway-bridge-basicstation-us915_1.toml
     ports:
-      - "${CHIRPSTACK_GATEWAY_BRIDGE_PORT}:${CHIRPSTACK_GATEWAY_BRIDGE_PORT}"
+      - "${CHIRPSTACK_GATEWAY_BRIDGE_PORT}:3001"
     volumes:
       - ./configuration/chirpstack-gateway-bridge:/etc/chirpstack-gateway-bridge
     depends_on:
@@ -58,9 +58,9 @@ services:
   chirpstack-rest-api:
     image: chirpstack/chirpstack-rest-api:4
     restart: unless-stopped
-    command: --server chirpstack:${CHIRPSTACK_PORT} --bind 0.0.0.0:${CHIRPSTACK_REST_API_PORT} --insecure
+    command: --server chirpstack:8080 --bind 0.0.0.0:8090 --insecure
     ports:
-      - "${CHIRPSTACK_REST_API_PORT}:${CHIRPSTACK_REST_API_PORT}"
+      - "${CHIRPSTACK_REST_API_PORT}:8090"
     depends_on:
       - chirpstack
     deploy:
@@ -76,7 +76,7 @@ services:
       - ./configuration/postgresql/initdb:/docker-entrypoint-initdb.d
       - ./storage/postgresqldata:/var/lib/postgresql/data
     ports:
-      - "${POSTGRES_PORT}:${POSTGRES_PORT}"
+      - "${POSTGRES_PORT}:5432"
     environment:
       - POSTGRES_USER=chirpstack
       - POSTGRES_PASSWORD=chirpstack
@@ -94,7 +94,7 @@ services:
     volumes:
       - ./storage/redisdata:/data
     ports:
-      - "${REDIS_PORT}:${REDIS_PORT}"
+      - "${REDIS_PORT}:6379"
     deploy:
       resources:
         limits:
@@ -105,7 +105,7 @@ services:
     image: eclipse-mosquitto:2
     restart: unless-stopped
     ports:
-      - "${EMQX_PORT}:${EMQX_PORT}"
+      - "${EMQX_PORT}:1883"
     volumes: 
       - ./configuration/mosquitto/config/:/mosquitto/config/
     deploy:

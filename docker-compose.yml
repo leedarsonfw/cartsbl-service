@@ -1,6 +1,6 @@
 services:
   chirpstack:
-    image: leedarson/cartsbl:${ARCH}-v1.8.4
+    image: leedarson/cartsbl:${ARCH}-v1.8.6
     command: -c /etc/chirpstack
     restart: unless-stopped
     volumes:

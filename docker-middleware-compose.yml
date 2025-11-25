@@ -1,6 +1,6 @@
 services:
   sbl-middleware-srv:
-    image: leedarson/cartsbl_middleware:${ARCH}-V1.07.00
+    image: leedarson/cartsbl_middleware:${ARCH}-V1.07.02
     volumes:
       - ${CURR_PATH}/storage/logs:/logs
       - ${CURR_PATH}/storage/tmp:/tmp

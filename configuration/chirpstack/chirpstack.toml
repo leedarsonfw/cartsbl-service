@@ -69,7 +69,10 @@
   ]
 
 [network.scheduler]
+  interval="10ms"
   multicast_class_c_margin="1s"
+  class_c_lock_duration="0s"
+  class_a_lock_duration="0s"
 
 # API interface configuration.
 [api]

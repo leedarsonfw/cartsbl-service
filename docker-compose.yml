@@ -1,6 +1,6 @@
 services:
   chirpstack:
-    image: leedarson/cartsbl:${ARCH}-v1.9.2
+    image: leedarson/cartsbl:${ARCH}-v2.3.0
     command: -c /etc/chirpstack
     restart: unless-stopped
     volumes:
@@ -22,7 +22,7 @@ services:
         limits:
           cpus: '2'
           memory: 512M
-  
+
   chirpstack-gateway-bridge-basicstation-na:
     image: chirpstack/chirpstack-gateway-bridge:4
     restart: unless-stopped
@@ -106,7 +106,7 @@ services:
     restart: unless-stopped
     ports:
       - "${EMQX_PORT}:1883"
-    volumes: 
+    volumes:
       - ./configuration/mosquitto/config/:/mosquitto/config/
     deploy:
       resources:

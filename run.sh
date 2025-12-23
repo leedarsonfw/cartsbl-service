@@ -1,7 +1,6 @@
 #!/bin/bash
 
 stack_name="lorawan-stack-v2"
-middleware_name="middleware-stack-v2"
 curr_path=$(realpath .)
 
 function log_yellow()
@@ -49,7 +48,6 @@ _run_sh_complete()
         basic
         cluster_init
         cluster_tag
-        middleware
         volume_clean
         network_clean
         one_node
@@ -61,7 +59,6 @@ _run_sh_complete()
     )
 
     # Subcommands and options per command
-    local middleware_sub=(start stop restart config)
     local one_node_sub=(start stop restart)
     local setup_args=(0 1 2 clean)
     local basic_args=(stop)
@@ -74,10 +71,6 @@ _run_sh_complete()
 
     # Complete second argument based on the first
     case "${COMP_WORDS[1]}" in
-        middleware)
-            COMPREPLY=( $(compgen -W "${middleware_sub[*]}" -- "${curr}") )
-            return 0
-            ;;
         one_node)
             COMPREPLY=( $(compgen -W "${one_node_sub[*]}" -- "${curr}") )
             return 0
@@ -315,95 +308,6 @@ sentinel parallel-syncs mymaster 1
 EOF
 }
 
-function create_middleware_config()
-{
-
-    ns_ip=${VIP}
-    redis_port=${REDIS_FRONTEND_PORT}
-
-    if [ "true"x == "${ONE_NODE}"x ]; then
-        ns_ip=${CLUSTER_NODE0_IP}
-        redis_port=${REDIS_PORT}
-    fi
-
-    cat > ${curr_path}/stack/sbl_middleware.yaml << EOF
-
-# Network Server
-ns:
-  # Required (no default in YAML, should be provided)
-  ip: "${ns_ip}"
-  # MQTT Port
-  mqtt_port: ${EMQX_PORT}
-  # API Port
-  api_port: ${CHIRPSTACK_PORT}
-  # Redis Port
-  redis_port: ${redis_port}
-  # Postgres Port
-  postgres_port: ${POSTGRES_PORT}
-  # API key for authentication (must be provided)
-  apikey: "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJhdWQiOiJjaGlycHN0YWNrIiwiaXNzIjoiY2hpcnBzdGFjayIsInN1YiI6IjE5NTc1MzAwLTY5YzQtNDAzMi04YzM5LWVkNWZmYjg4ODVjNSIsInR5cCI6ImtleSJ9.qaprUz7BkS7NY8bVapvkw-z2G5RnIkddPi2H462h79o"
-  # Tenant ID (optional)
-  tenant_id: null
-  # Application ID (optional)
-  app_id: null
-  # Region (us915_1, eu868, etc.)
-  region: "us915_1"
-  # Max devices to load
-  max_devices: 2000
-  # Max gateways to load
-  max_gateways: 20
-  # Max concurrency for devices
-  max_concurrency: 100
-  # Update downlink path
-  dl_update: true
-  # Downlink update interval, milliseconds
-  dl_update_interval: 100
-  # Downlink data rate, US915:DR8-DR13, EU868:DR0-DR5
-  dl_dr: 13
-  # Downlink frequency, US915:923300000, EU868:869700000
-  dl_frequency: 923300000 
-  # Downlink power, US915:21, EU868:7
-  dl_power: 21
-  # Downlink channel number, 0 or 1 indicates that grouping is not enabled.
-  # for US915, The default channels start from 923.3MHz, with one channel every 600KHz, and a maximum of 8 channels.
-  # for EU868, does not support grouping.
-  dl_channel_groups: 1
-  dl_channel_bind_gateway: true
-  # Signin enabled, register response by middleware
-  signin_enabled: true
-  # check gateway online interval, seconds
-  check_period: 10
-  # gateway offline threshold, seconds
-  offline_threshold: 60
-  # device online check interval, minutes
-  dev_online_check_period: 1
-  # MQTT QoS, 0 = At most once, 1 = At least once, 2 = Exactly once
-  mqtt_qos: 1
-  # Daemon MQTT heartbeat, true or false
-  daemon_mqtt_heartbeat: false
-
-# Logging Configuration
-logging:
-  # Log level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
-  level: "info"
-  # Log file directory
-  path: "logs"
-  # Max file size
-  max_file_size: 100M
-  # Backup count
-  backup_count: 10
-
-timeouts:
-  # Ack timeout in seconds (from gateway)
-  ack_timeout: 0.3
-  # Response timeout in seconds (from device)
-  response_timeout: 0.4
-  # Max retry times
-  max_retry: 5
-
-EOF
-}
-
 function create_keepalived_config()
 {
     node=$1
@@ -481,7 +385,6 @@ bitnamilegacy/postgresql-repmgr:14.12.0
 leedarson/haproxy:${arch}-V1.02.00
 redis:7-alpine
 emqx/emqx:5.6.0
-leedarson/cartsbl_middleware:${arch}-V1.06.01
 "
 
     for img in ${list}; do
@@ -563,7 +466,6 @@ function config()
     create_sentinel_config 1 ${CLUSTER_NODE1_IP}
     create_sentinel_config 2 ${CLUSTER_NODE2_IP}
     
-    create_middleware_config
     ./import_config.sh 
 }
 
@@ -621,70 +523,9 @@ function cluster_tag()
     docker node update --label-add node.id=3 ${node2_id}
 }
 
-function middleware_config()
-{
-    name=sbl-middleware-config
-    is_exist=$(docker config ls | grep "${name}")
-    if [ ""x != "${is_exist}"x ]; then
-        log_warn "${name} has already exist, delete ..."
-        docker config rm ${name}
-    fi
-
-    yaml_file=${curr_path}/stack/sbl_middleware.yaml
-    if [ ! -e ${yaml_file} ] || [ "true"x == "${ONE_NODE}"x ]; then
-        create_middleware_config
-    fi
-
-    docker config create ${name} ${curr_path}/stack/sbl_middleware.yaml
-}
-
-function middleware_start()
-{
-    check_is_master_node
-    if [ ! -e ${curr_path}/stack/sbl_middleware.yaml ]; then
-        middleware_config
-    fi
-
-    if [ "true"x == "${ONE_NODE}"x ]; then
-        docker compose -f docker-middleware-compose.yml up -d
-        exit 0
-    fi
-
-    docker stack deploy --resolve-image never -c docker-middleware-stack.yml ${middleware_name}
-}
-
-function middleware_stop()
-{
-    check_is_master_node
-    if [ "true"x == "${ONE_NODE}"x ]; then
-        docker compose -f docker-middleware-compose.yml down
-        exit 0
-    fi
-
-    wait_stop_done ${middleware_name}
-}
-
-function middleware_restart()
-{
-    middleware_stop
-    middleware_start
-}
-
-function middleware()
-{
-    check_is_master_node
-    if [ ""x == "$2"x ]; then
-        middleware_start
-        exit 0
-    fi
-
-    middleware_$2 ${@:3}
-}
-
 function volume_clean()
 {
     docker volume ls --filter label=com.docker.stack.namespace=${stack_name} -q | xargs -r docker volume rm
-    docker volume ls --filter label=com.docker.stack.namespace=${middleware_name} -q | xargs -r docker volume rm
 }
 
 function network_clean()

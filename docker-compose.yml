@@ -14,20 +14,23 @@ services:
     volumes:
       - ./data/prometheus-rules:/mnt
       - ./data/alertmanager-sync:/mnt-am
+      - ./data/chirpstack-backups:/mnt-backups
       - ./configuration/alertmanager:/src-am:ro
     command:
       - |
         set -e
-        mkdir -p /mnt /mnt-am
+        mkdir -p /mnt /mnt-am /mnt-backups
         if [ ! -s /mnt-am/chirpstack-active.yml ]; then
           cp /src-am/alertmanager.yml /mnt-am/chirpstack-active.yml
         fi
-        chown -R 1000:1000 /mnt /mnt-am
-        chmod 2775 /mnt /mnt-am
+        chown -R 1000:1000 /mnt /mnt-am /mnt-backups
+        chmod 2775 /mnt /mnt-am /mnt-backups
         find /mnt -mindepth 1 -type d -exec chmod 2775 {} + 2>/dev/null || true
         find /mnt -type f -exec chmod 664 {} + 2>/dev/null || true
         find /mnt-am -mindepth 1 -type d -exec chmod 2775 {} + 2>/dev/null || true
         find /mnt-am -type f -exec chmod 664 {} + 2>/dev/null || true
+        find /mnt-backups -mindepth 1 -type d -exec chmod 2775 {} + 2>/dev/null || true
+        find /mnt-backups -type f -exec chmod 664 {} + 2>/dev/null || true
 
   chirpstack:
     image: leedarson/cartsbl:${ARCH}-v2.12.0

@@ -1,34 +1,116 @@
+networks:
+  monitor-net:
+    name: monitor-net
+    driver: bridge
+
 services:
+  # Same logic as docker-basic-compose basic-data-init, but only ./data/prometheus-rules (main stack has no Grafana/Prometheus here).
+  basic-data-init:
+    # Reuse postgres:14-alpine (same as postgres/backup-runner) so offline env need not pull alpine.
+    image: postgres:14-alpine
+    user: "0:0"
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c"]
+    volumes:
+      - ./data/prometheus-rules:/mnt
+      - ./data/alertmanager-sync:/mnt-am
+      - ./configuration/alertmanager:/src-am:ro
+    command:
+      - |
+        set -e
+        mkdir -p /mnt /mnt-am
+        if [ ! -s /mnt-am/chirpstack-active.yml ]; then
+          cp /src-am/alertmanager.yml /mnt-am/chirpstack-active.yml
+        fi
+        chown -R 1000:1000 /mnt /mnt-am
+        chmod 2775 /mnt /mnt-am
+        find /mnt -mindepth 1 -type d -exec chmod 2775 {} + 2>/dev/null || true
+        find /mnt -type f -exec chmod 664 {} + 2>/dev/null || true
+        find /mnt-am -mindepth 1 -type d -exec chmod 2775 {} + 2>/dev/null || true
+        find /mnt-am -type f -exec chmod 664 {} + 2>/dev/null || true
+
   chirpstack:
     image: leedarson/cartsbl:${ARCH}-v2.12.0
+    user: "1000:1000"
     command: -c /etc/chirpstack
     restart: unless-stopped
     volumes:
       - ./configuration/chirpstack:/etc/chirpstack
+      - ./data/chirpstack-backups:/var/lib/chirpstack/backups
+      # Static rules for UI / copy when DB rules empty (read-only). Active file is written under ./data/prometheus-rules.
+      - ./configuration/prometheus/alerts:/var/application/prometheus/config/alerts:ro
+      # Writable sync dir: same bind mount must be attached to Prometheus as alerts-sync (docker-basic-compose).
+      - ./data/prometheus-rules:/var/lib/chirpstack/prometheus-rules
+      # Default Alertmanager YAML (read-only); active file is written under ./data/alertmanager-sync.
+      - ./configuration/alertmanager:/var/application/alertmanager/config:ro
+      - ./data/alertmanager-sync:/var/lib/chirpstack/alertmanager
+      # Mount host sysfs so backup_s3 can read the host NIC MAC (not docker-assigned veth MACs).
+      - /sys:/host/sys:ro
+      # Mount host procfs so backup_s3 can read host default route (avoid container namespace).
+      - /proc:/host/proc:ro
+      # Host wall-clock zone for backup UI/schedule (not the container's /etc).
+      - /etc/localtime:/host/etc/localtime:ro
+      - /etc/timezone:/host/etc/timezone:ro
+      # - /mnt/Exthdd/oliver/sdks/chirpstack/target/x86_64-unknown-linux-musl/release/chirpstack:/usr/bin/chirpstack
     depends_on:
-      - postgres
-      - emqx
-      - redis
+      postgres:
+        condition: service_started
+      backup-runner:
+        condition: service_started
+      emqx:
+        condition: service_started
+      redis:
+        condition: service_started
+      basic-data-init:
+        condition: service_completed_successfully
     environment:
       - MQTT_BROKER_HOST=emqx
-      - MQTT_BROKER_PORT=${EMQX_PORT}
+      - MQTT_BROKER_PORT=${EMQX_PORT:-1883}
       - REDIS_HOST=redis
-      - REDIS_PORT=${REDIS_PORT}
+      - REDIS_PORT=${REDIS_PORT:-6379}
       - POSTGRESQL_HOST=postgres
+      - CHIRPSTACK_PGDUMP_RUNNER_URL=http://backup-runner:8081/pg_dump
+      - CHIRPSTACK_PGRESTORE_RUNNER_URL=http://backup-runner:8081/pg_restore
+      # Host-provided primary NIC MAC for S3 prefix fallback (computed by run.sh).
+      - CHIRPSTACK_PRIMARY_MAC=${CHIRPSTACK_PRIMARY_MAC}
+      # Host IANA timezone for backup display/schedule when DB timezone is unset (computed by run.sh).
+      - CHIRPSTACK_HOST_TIMEZONE=${CHIRPSTACK_HOST_TIMEZONE}
     ports:
       - "${CHIRPSTACK_PORT}:8080"
+    networks:
+      - default
+      - monitor-net
     deploy:
       resources:
         limits:
           cpus: '2'
           memory: 512M
 
+  # Provides pg_dump for backup management without rebuilding ChirpStack image.
+  backup-runner:
+    image: postgres:14-alpine
+    restart: unless-stopped
+    volumes:
+      - ./data/chirpstack-backups:/var/lib/chirpstack/backups
+      - ./backup-runner/runner.py:/runner.py:ro
+    environment:
+      - RUNNER_HOST=0.0.0.0
+      - RUNNER_PORT=8081
+    command: >
+      sh -c "
+        echo 'http://mirrors.aliyun.com/alpine/v3.18/main' > /etc/apk/repositories &&
+        echo 'http://mirrors.aliyun.com/alpine/v3.18/community' >> /etc/apk/repositories &&
+        apk update --no-cache &&
+        apk add --no-cache postgresql15-client python3 &&
+        python3 /runner.py
+      "
+
   chirpstack-gateway-bridge-basicstation-na:
     image: chirpstack/chirpstack-gateway-bridge:4
     restart: unless-stopped
     command: -c /etc/chirpstack-gateway-bridge/chirpstack-gateway-bridge-basicstation-us915_1.toml
     ports:
-      - "${CHIRPSTACK_GATEWAY_BRIDGE_PORT}:3001"
+      - "${CHIRPSTACK_GATEWAY_BRIDGE_PORT:-3001}:3001"
     volumes:
       - ./configuration/chirpstack-gateway-bridge:/etc/chirpstack-gateway-bridge
     depends_on:
@@ -60,7 +142,7 @@ services:
     restart: unless-stopped
     command: --server chirpstack:8080 --bind 0.0.0.0:8090 --insecure
     ports:
-      - "${CHIRPSTACK_REST_API_PORT}:8090"
+      - "${CHIRPSTACK_REST_API_PORT:-8090}:8090"
     depends_on:
       - chirpstack
     deploy:
@@ -76,7 +158,7 @@ services:
       - ./configuration/postgresql/initdb:/docker-entrypoint-initdb.d
       - ./storage/postgresqldata:/var/lib/postgresql/data
     ports:
-      - "${POSTGRES_PORT}:5432"
+      - "${POSTGRES_PORT:-5432}:5432"
     environment:
       - POSTGRES_USER=chirpstack
       - POSTGRES_PASSWORD=chirpstack
@@ -86,6 +168,9 @@ services:
         limits:
           cpus: '1'
           memory: 128M
+    networks:
+      - default
+      - monitor-net
 
   redis:
     image: redis:7-alpine
@@ -94,18 +179,23 @@ services:
     volumes:
       - ./storage/redisdata:/data
     ports:
-      - "${REDIS_PORT}:6379"
+      - "${REDIS_PORT:-6379}:6379"
     deploy:
       resources:
         limits:
           cpus: '1'
           memory: 128M
 
+    networks:
+      - default
+      - monitor-net
+
   emqx:
     image: eclipse-mosquitto:2
     restart: unless-stopped
     ports:
-      - "${EMQX_PORT}:1883"
+      - "${EMQX_PORT:-1883}:1883"
+      - "${EMQX_WEBSOCKET_PORT:-1884}:1884"
     volumes:
       - ./configuration/mosquitto/config/:/mosquitto/config/
     deploy:
@@ -113,6 +203,9 @@ services:
         limits:
           cpus: '1'
           memory: 128M
+    networks:
+      - default
+      - monitor-net
 
 volumes:
   postgresqldata:

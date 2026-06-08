@@ -82,6 +82,11 @@
   #   openssl rand -base64 32
   secret="you-must-replace-this"
 
+# Prometheus metrics for alerting (`/metrics` on this bind). If empty, ChirpStack does not listen — Prometheus shows "connection refused".
+# Port must match the `chirpstack` scrape target in prometheus.yml (e.g. chirpstack:9091).
+[monitoring]
+  bind="0.0.0.0:9091"
+
 
 [integration]
   enabled=["mqtt"]
@@ -89,3 +94,16 @@
   [integration.mqtt]
     server="tcp://$MQTT_BROKER_HOST:$MQTT_BROKER_PORT/"
     json=true
+
+# Alerts + Prometheus rule sync.
+# When alert_settings.rules exists in the DB, ChirpStack writes the generated Prometheus rule file below
+# and asks Prometheus to reload so the rules take effect.
+[alerts]
+  prometheus_static_rules_path="/var/application/prometheus/config/alerts/host-alerts.yml"
+  # Writable path inside the container; ./data/prometheus-rules is bind-mounted here and into Prometheus alerts-sync.
+  prometheus_active_rules_path="/var/lib/chirpstack/prometheus-rules/chirpstack-active.yml"
+  prometheus_reload_url="http://prometheus:9090/-/reload"
+  # Alertmanager: static template (read-only mount); ChirpStack writes to ./data/alertmanager-sync which Alertmanager reads directly.
+  alertmanager_static_config_path="/var/application/alertmanager/config/alertmanager.yml"
+  alertmanager_active_config_path="/var/lib/chirpstack/alertmanager/chirpstack-active.yml"
+  alertmanager_reload_url="http://alertmanager:9093/-/reload"

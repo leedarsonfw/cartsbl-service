@@ -1,31 +1,252 @@
+# ./data/* bind mounts: one-shot init fixes ownership for official image UIDs (no manual chown).
+# Prometheus nobody=65534, Grafana=472, ChirpStack rules dir=1000, Portainer runs as root.
+# Init uses postgres:14-alpine (already pulled with main stack) to avoid pulling alpine in offline env.
 services:
+  basic-data-init:
+    image: postgres:14-alpine
+    user: "0:0"
+    restart: "no"
+    # Use host network namespace so /sys/class/net and /proc/net/route match the device (no run.sh).
+    network_mode: host
+    entrypoint: ["/bin/sh", "-c"]
+    volumes:
+      - ./data/prometheus:/mnt/prometheus
+      - ./data/grafana:/mnt/grafana
+      - ./data/portainer:/mnt/portainer
+      - ./data/prometheus-rules:/mnt/prometheus-rules
+      - ./data/alertmanager-sync:/mnt/alertmanager-sync
+      - ./configuration/alertmanager:/src/alertmanager:ro
+      - ./configuration/prometheus/prometheus.yml:/src/prometheus-template.yml:ro
+      - .:/mnt/service:rw
+    command:
+      - |
+        set -e
+        mkdir -p /mnt/prometheus /mnt/grafana /mnt/portainer /mnt/prometheus-rules /mnt/alertmanager-sync
+        if [ ! -s /mnt/alertmanager-sync/chirpstack-active.yml ]; then
+          cp /src/alertmanager/alertmanager.yml /mnt/alertmanager-sync/chirpstack-active.yml
+        fi
+        chown -R 65534:65534 /mnt/prometheus
+        chown -R 472:472 /mnt/grafana
+        chown -R 0:0 /mnt/portainer
+        chown -R 1000:1000 /mnt/prometheus-rules
+        chown -R 1000:1000 /mnt/alertmanager-sync
+        chmod 2775 /mnt/prometheus-rules
+        chmod 2775 /mnt/alertmanager-sync
+        find /mnt/prometheus-rules -mindepth 1 -type d -exec chmod 2775 {} + 2>/dev/null || true
+        find /mnt/prometheus-rules -type f -exec chmod 664 {} + 2>/dev/null || true
+        find /mnt/alertmanager-sync -mindepth 1 -type d -exec chmod 2775 {} + 2>/dev/null || true
+        find /mnt/alertmanager-sync -type f -exec chmod 664 {} + 2>/dev/null || true
+        host_mac=""
+        set +e
+        for p in /sys/class/net/*/address; do
+          [ -f "$$p" ] || continue
+          iface=$$(basename "$$(dirname "$$p")")
+          case "$$iface" in lo|docker*|br-*|veth*|virbr*|tun*|tap*|wg*) continue ;; esac
+          [ -e "/sys/class/net/$$iface/device" ] || continue
+          [ "$$(cat "/sys/class/net/$$iface/operstate" 2>/dev/null)" = "up" ] || continue
+          m=$$(cat "$$p" 2>/dev/null | tr -d '\r' | tr '[:upper:]' '[:lower:]')
+          if [ -n "$$m" ] && [ "$$m" != "00:00:00:00:00:00" ] && echo "$$m" | grep -qE '^([0-9a-f]{2}:){5}[0-9a-f]{2}$$'; then
+            host_mac="$$m"
+            break
+          fi
+        done
+        if [ -z "$$host_mac" ]; then
+          for iface in $$(awk 'NR>1 && $$2=="00000000" {print $$1}' /proc/net/route 2>/dev/null | sort -u); do
+            [ -z "$$iface" ] && continue
+            case "$$iface" in lo|docker*|br-*|veth*|virbr*|tun*|tap*|wg*) continue ;; esac
+            addr="/sys/class/net/$$iface/address"
+            [ -f "$$addr" ] || continue
+            m=$$(cat "$$addr" 2>/dev/null | tr -d '\r' | tr '[:upper:]' '[:lower:]')
+            if [ -n "$$m" ] && [ "$$m" != "00:00:00:00:00:00" ] && echo "$$m" | grep -qE '^([0-9a-f]{2}:){5}[0-9a-f]{2}$$'; then
+              host_mac="$$m"
+              break
+            fi
+          done
+        fi
+        if [ -z "$$host_mac" ]; then
+          for p in /sys/class/net/*/address; do
+            [ -f "$$p" ] || continue
+            iface=$$(basename "$$(dirname "$$p")")
+            case "$$iface" in lo|docker*|br-*|veth*|virbr*|tun*|tap*|wg*) continue ;; esac
+            m=$$(cat "$$p" 2>/dev/null | tr -d '\r' | tr '[:upper:]' '[:lower:]')
+            if [ -n "$$m" ] && [ "$$m" != "00:00:00:00:00:00" ] && echo "$$m" | grep -qE '^([0-9a-f]{2}:){5}[0-9a-f]{2}$$'; then
+              host_mac="$$m"
+              break
+            fi
+          done
+        fi
+        set -e
+        [ -n "$$host_mac" ] || host_mac="unknown"
+        echo "Detected MAC: $$host_mac"
+        if [ "$$host_mac" != "unknown" ]; then
+          dotenv=/mnt/service/.env
+          if [ -f "$$dotenv" ] && grep -q '^CHIRPSTACK_PRIMARY_MAC=' "$$dotenv" 2>/dev/null; then
+            sed -i "s/^CHIRPSTACK_PRIMARY_MAC=.*/CHIRPSTACK_PRIMARY_MAC=$$host_mac/" "$$dotenv"
+          else
+            echo "CHIRPSTACK_PRIMARY_MAC=$$host_mac" >> "$$dotenv"
+          fi
+        fi
+        awk -v m="$$host_mac" '{gsub(/PLACEHOLDER_MAC_ADDRESS/, m); print}' /src/prometheus-template.yml > /mnt/prometheus/prometheus.yml
+        cat /mnt/prometheus/prometheus.yml
+
   portainer:
     image: portainer/portainer-ce:latest
     container_name: portainer
-    restart: always
+    restart: unless-stopped
     ports:
       - "${PORTAINER_PORT}:9000/tcp"
     volumes:
-      - /var/application/portainer/data:/data
+      - ./data/portainer:/data
       - /var/run/docker.sock:/var/run/docker.sock
     networks:
       - portainer-net
-
-  keepalived:
-    image: ${KEEPALIVED_IMAGE}
-    container_name: keepalived
-    restart: always
-    network_mode: host
-    cap_add:
-      - NET_ADMIN
-      - NET_BROADCAST
-      - NET_RAW
-    volumes:
-      - ./stack/keepalived-${NODE_ID}.conf:/usr/local/etc/keepalived/keepalived.conf
-      - /var/run/keepalived:/var/run/keepalived
+      - monitor-net
     depends_on:
-      - portainer
+      basic-data-init:
+        condition: service_completed_successfully
+
+  # Ensure host dir has alerts/ with host-alerts.yml + chirpstack-active.yml (see configuration/prometheus).
+  # ChirpStack writes chirpstack-active.yml from DB rules; prometheus.yml rule_files must point to that file.
+  # Alertmanager loads ./data/alertmanager-sync/chirpstack-active.yml (seeded by basic-data-init; ChirpStack overwrites from UI/DB).
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    restart: unless-stopped
+    ports:
+      - "${PROMETHEUS_PORT:-9090}:9090/tcp"
+    volumes:
+      - ./data/prometheus:/prometheus
+      - ./data/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      # Same host path as cartsbl chirpstack service ./data/prometheus-rules (ChirpStack writes active rules here).
+      - ./data/prometheus-rules:/etc/prometheus/alerts-sync
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.enable-lifecycle'
+    networks:
+      - monitor-net
+    depends_on:
+      alertmanager:
+        condition: service_started
+      basic-data-init:
+        condition: service_completed_successfully
+
+  alertmanager:
+    image: prom/alertmanager:latest
+    container_name: alertmanager
+    restart: unless-stopped
+    ports:
+      - "${ALERTMANAGER_PORT:-9093}:9093/tcp"
+    volumes:
+      - ./data/alertmanager-sync/chirpstack-active.yml:/etc/alertmanager/alertmanager.yml:ro
+    command:
+      - '--config.file=/etc/alertmanager/alertmanager.yml'
+      - '--storage.path=/alertmanager'
+    networks:
+      - monitor-net
+    depends_on:
+      basic-data-init:
+        condition: service_completed_successfully
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    restart: unless-stopped
+    ports:
+      - "${GRAFANA_PORT:-3000}:3000/tcp"
+    volumes:
+      - ./data/grafana:/var/lib/grafana
+      - ./configuration/grafana/config/prometheus_datasource.yaml:/etc/grafana/provisioning/datasources/prometheus_datasource.yaml:ro
+      - ./configuration/grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./configuration/grafana/dashboards:/etc/grafana/provisioning/dashboards-json:ro
+    environment:
+      - GF_SECURITY_ALLOW_EMBEDDING=true
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer
+      - GF_AUTH_ANONYMOUS_ORG_NAME=Main Org.
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin}
+    networks:
+      - monitor-net
+    depends_on:
+      prometheus:
+        condition: service_started
+      basic-data-init:
+        condition: service_completed_successfully
+
+  node-exporter:
+    image: prom/node-exporter:latest
+    container_name: node-exporter
+    restart: unless-stopped
+    ports:
+      - "${NODE_EXPORTER_PORT:-9100}:9100/tcp"
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    command:
+      - '--path.procfs=/host/proc'
+      - '--path.sysfs=/host/sys'
+      - '--path.rootfs=/rootfs'
+      - '--collector.netstat'
+      - '--collector.tcpstat'
+    networks:
+      - monitor-net
+
+  redis-exporter:
+    image: ${REDIS_EXPORTER_IMAGE:-quay.io/oliver006/redis_exporter:v1.82.0}
+    container_name: redis-exporter
+    restart: unless-stopped
+    networks:
+      - monitor-net
+    environment:
+      - REDIS_ADDR=redis://${REDIS_HOST:-redis}:${REDIS_PORT:-6379}
+      # - REDIS_PASSWORD=yourpassword
+    ports:
+      - "${REDIS_EXPORTER_PORT:-9121}:9121/tcp"
+
+  postgres-exporter:
+    image: ${POSTGRES_EXPORTER_IMAGE:-quay.io/prometheuscommunity/postgres-exporter:v0.17.1}
+    container_name: postgres-exporter
+    restart: unless-stopped
+    environment:
+      - DATA_SOURCE_NAME=postgresql://${POSTGRES_USER:-chirpstack}:${POSTGRES_PASSWORD:-chirpstack}@${POSTGRES_HOST:-cartsbl-service-postgres-1}:${POSTGRES_PORT_INNER:-5432}/${POSTGRES_DB:-chirpstack}?sslmode=disable
+    ports:
+      - "${POSTGRES_EXPORTER_PORT:-9187}:9187/tcp"
+    networks:
+      - monitor-net
+
+  mosquitto-exporter:
+    image: ${MOSQUITTO_EXPORTER_IMAGE:-sapcc/mosquitto-exporter:latest}
+    container_name: mosquitto-exporter
+    restart: unless-stopped
+    environment:
+      - BROKER_ENDPOINT=tcp://emqx:${EMQX_PORT:-1883}
+      # - MQTT_USER=
+      # - MQTT_PASS=
+    ports:
+      - "${MOSQUITTO_EXPORTER_PORT:-9234}:9234"
+    networks:
+      - monitor-net
+
+ # keepalived:
+ #   image: ${KEEPALIVED_IMAGE}
+ #   container_name: keepalived
+ #   restart: always
+ #   network_mode: host
+ #   cap_add:
+ #     - NET_ADMIN
+ #     - NET_BROADCAST
+ #     - NET_RAW
+ #   volumes:
+ #     - ./stack/keepalived-${NODE_ID}.conf:/usr/local/etc/keepalived/keepalived.conf
+ #     - /var/run/keepalived:/var/run/keepalived
+ #   depends_on:
+ #     - portainer
 
 networks:
   portainer-net:
+    driver: bridge
+  monitor-net:
+    name: monitor-net
     driver: bridge

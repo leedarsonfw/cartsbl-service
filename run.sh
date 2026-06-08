@@ -28,6 +28,140 @@ function log()
     echo -e "\033[37m$@\033[0m"
 }
 
+function detect_host_primary_mac()
+{
+    local iface mac p
+
+    _is_virtual_iface() {
+        case "$1" in
+            lo|docker*|br-*|veth*|virbr*|tun*|tap*|wg*) return 0 ;;
+        esac
+        # Some veth pairs don't start with "veth" (rare) — detect by DEVTYPE.
+        if [ -f "/sys/class/net/$1/uevent" ] && grep -q "^DEVTYPE=veth$" "/sys/class/net/$1/uevent" 2>/dev/null; then
+            return 0
+        fi
+        return 1
+    }
+
+    _read_mac() {
+        mac=$(cat "/sys/class/net/$1/address" 2>/dev/null | tr -d '\r' | tr '[:upper:]' '[:lower:]')
+        if [[ "${mac}" =~ ^([0-9a-f]{2}:){5}[0-9a-f]{2}$ ]] && [[ "${mac}" != "00:00:00:00:00:00" ]]; then
+            echo "${mac}"
+            return 0
+        fi
+        return 1
+    }
+
+    _is_physical_up() {
+        # Physical NICs usually have a device symlink and operstate up.
+        [ -e "/sys/class/net/$1/device" ] || return 1
+        [ "$(cat "/sys/class/net/$1/operstate" 2>/dev/null)" = "up" ] || return 1
+        return 0
+    }
+
+    # 1) Prefer physical+UP interfaces first (best match for "device real MAC").
+    for p in /sys/class/net/*/address; do
+        iface=$(basename "$(dirname "$p")")
+        _is_virtual_iface "${iface}" && continue
+        _is_physical_up "${iface}" || continue
+        _read_mac "${iface}" && return 0
+    done
+
+    # 2) Next, try default-route interface(s) (can be multiple) but still skip virtual ones.
+    while read -r iface; do
+        [ -z "${iface}" ] && continue
+        _is_virtual_iface "${iface}" && continue
+        _read_mac "${iface}" && return 0
+    done < <(ip -o route show default 0.0.0.0/0 2>/dev/null | awk '{for(i=1;i<=NF;i++) if ($i=="dev") {print $(i+1)}}')
+
+    # 3) Final fallback: first non-virtual NIC MAC.
+    for p in /sys/class/net/*/address; do
+        iface=$(basename "$(dirname "$p")")
+        _is_virtual_iface "${iface}" && continue
+        _read_mac "${iface}" && return 0
+    done
+
+    return 1
+}
+
+function update_env_primary_mac()
+{
+    local mac
+    mac=$(detect_host_primary_mac)
+    if [ -z "${mac}" ]; then
+        log_warn "Could not detect host primary MAC; CHIRPSTACK_PRIMARY_MAC not updated"
+        return 0
+    fi
+
+    if [ -f "${curr_path}/.env" ]; then
+        if grep -q '^CHIRPSTACK_PRIMARY_MAC=' "${curr_path}/.env"; then
+            sed -i "s/^CHIRPSTACK_PRIMARY_MAC=.*/CHIRPSTACK_PRIMARY_MAC=${mac}/" "${curr_path}/.env"
+        else
+            echo "CHIRPSTACK_PRIMARY_MAC=${mac}" >> "${curr_path}/.env"
+        fi
+    else
+        echo "CHIRPSTACK_PRIMARY_MAC=${mac}" > "${curr_path}/.env"
+    fi
+    export CHIRPSTACK_PRIMARY_MAC="${mac}"
+    log_info "Detected host MAC: ${mac}"
+}
+
+function detect_host_timezone()
+{
+    local tz target
+
+    if [ -r /etc/timezone ]; then
+        tz=$(tr -d '\r\n' < /etc/timezone | tr -d '[:space:]')
+        if [ -n "${tz}" ]; then
+            echo "${tz}"
+            return 0
+        fi
+    fi
+
+    if command -v timedatectl >/dev/null 2>&1; then
+        tz=$(timedatectl show -p Timezone --value 2>/dev/null | tr -d '[:space:]')
+        if [ -n "${tz}" ] && [ "${tz}" != "n/a" ]; then
+            echo "${tz}"
+            return 0
+        fi
+    fi
+
+    if [ -e /etc/localtime ]; then
+        target=$(readlink -f /etc/localtime 2>/dev/null || true)
+        case "${target}" in
+            */zoneinfo/*)
+                echo "${target#*/zoneinfo/}"
+                return 0
+                ;;
+        esac
+    fi
+
+    return 1
+}
+
+function update_env_host_timezone()
+{
+    local tz
+
+    tz=$(detect_host_timezone)
+    if [ -z "${tz}" ]; then
+        log_warn "Could not detect host timezone; CHIRPSTACK_HOST_TIMEZONE not updated"
+        return 0
+    fi
+
+    if [ -f "${curr_path}/.env" ]; then
+        if grep -q '^CHIRPSTACK_HOST_TIMEZONE=' "${curr_path}/.env"; then
+            sed -i "s/^CHIRPSTACK_HOST_TIMEZONE=.*/CHIRPSTACK_HOST_TIMEZONE=${tz}/" "${curr_path}/.env"
+        else
+            echo "CHIRPSTACK_HOST_TIMEZONE=${tz}" >> "${curr_path}/.env"
+        fi
+    else
+        echo "CHIRPSTACK_HOST_TIMEZONE=${tz}" > "${curr_path}/.env"
+    fi
+    export CHIRPSTACK_HOST_TIMEZONE="${tz}"
+    log_info "Detected host timezone: ${tz}"
+}
+
 # Early exit for completion script to avoid any side effects or extra stdout
 if [ "$1"x == "completion-script"x ]; then
 cat << 'EOF'
@@ -535,6 +669,8 @@ function network_clean()
 
 function one_node_start()
 {
+    update_env_primary_mac
+    update_env_host_timezone
     if [ ! -d ${CURR_PATH}/storage/postgresqldata ]; then
         sudo tar zxvf postgresqldata.tgz -C storage
     fi

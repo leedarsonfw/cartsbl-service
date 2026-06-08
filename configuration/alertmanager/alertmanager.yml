@@ -1,0 +1,23 @@
+
+global:
+  smtp_smarthost: mail.leedarson.com:465
+  smtp_from: 2b_send@leedarson.com
+  smtp_require_tls: true
+  smtp_auth_username: 2b_send@leedarson.com
+  smtp_auth_password: 05598f0866-505ce5ac8e-67916f1dd1-4f5691d9d9-5878
+
+route:
+  receiver: email
+  group_by:
+  - alertname
+  - job
+  - instance
+  group_wait: 30s
+  group_interval: 10m
+  repeat_interval: 24h
+
+receivers:
+- name: email
+  email_configs:
+  - to: 2b_support@leedarson.com
+    send_resolved: true

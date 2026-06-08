@@ -1,0 +1,43 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    mac: PLACEHOLDER_MAC_ADDRESS
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ["alertmanager:9093"]
+
+# ChirpStack overwrites chirpstack-active.yml when alert_settings DB rules exist; otherwise it copies host-alerts.yml.
+rule_files:
+  - /etc/prometheus/alerts-sync/chirpstack-active.yml
+
+scrape_configs:
+  - job_name: "prometheus"
+    static_configs:
+      - targets: ["prometheus:9090"]
+
+  - job_name: "node-exporter"
+    static_configs:
+      - targets: ["node-exporter:9100"]
+
+  - job_name: "redis-exporter"
+    static_configs:
+      - targets: ["redis-exporter:9121"]
+
+  - job_name: "postgres-exporter"
+    static_configs:
+      - targets: ["postgres-exporter:9187"]
+
+  # Mosquitto metrics via exporter (subscribes to $SYS/broker/#).
+  - job_name: "mosquitto-exporter"
+    static_configs:
+      - targets: ["mosquitto-exporter:9234"]
+
+  # ChirpStack exposes Prometheus metrics on `[monitoring].bind` (path /metrics), not the gRPC API port.
+  - job_name: "chirpstack"
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["chirpstack:9091"]
+

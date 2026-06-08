@@ -1,0 +1,15 @@
+apiVersion: 1
+
+datasources:
+  - name: Prometheus   # 数据源名称，在Grafana中显示
+    type: prometheus   # 固定为prometheus
+    access: proxy      # proxy(推荐)或direct
+    url: http://prometheus:9090  # 【关键】你的Prometheus服务地址
+    isDefault: true    # 是否设为默认数据源
+    editable: true     # 是否允许用户在UI上编辑
+    jsonData:
+      timeInterval: "15s"          # 抓取间隔，与Prometheus配置一致
+      queryTimeout: "60s"          # 查询超时时间
+      httpMethod: "POST"           # 使用POST方法处理长查询
+    # secureJsonData:
+    #   basicAuthPassword: "your-password"  # 如需基础认证，在此配置密码

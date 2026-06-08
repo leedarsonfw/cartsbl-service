@@ -1,0 +1,47 @@
+groups:
+  - name: host-alerts
+    rules:
+      - alert: HostDown
+        expr: 'up{job="node-exporter"} == 0'
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Host node-exporter down ({{ $labels.instance }})"
+          description: "Prometheus cannot scrape node-exporter for {{ $labels.instance }} for 2 minutes."
+
+      - alert: HighCpuUsage
+        expr: '100 - (avg by (instance) (rate(node_cpu_seconds_total{mode="idle"}[1m])) * 100) > 90'
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High CPU usage ({{ $labels.instance }})"
+          description: "CPU usage > 90% for 1 minute on {{ $labels.instance }}."
+
+      - alert: HighLoad1mPerCore
+        expr: '(node_load1 / count by (instance) (node_cpu_seconds_total{mode="idle"})) > 1.5'
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High load per core ({{ $labels.instance }})"
+          description: "Load1 / cores > 1.5 for 1 minute on {{ $labels.instance }}."
+
+      - alert: HighMemoryUsage
+        expr: '(1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100 > 90'
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High memory usage ({{ $labels.instance }})"
+          description: "Memory usage > 90% for 1 minute on {{ $labels.instance }}."
+
+      - alert: LowDiskSpaceRoot
+        expr: '(node_filesystem_avail_bytes{mountpoint="/",fstype!~"tmpfs|overlay"} / node_filesystem_size_bytes{mountpoint="/",fstype!~"tmpfs|overlay"}) * 100 < 10'
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Low disk space on / ({{ $labels.instance }})"
+          description: "Disk free < 10% for 1 minute on {{ $labels.instance }}."

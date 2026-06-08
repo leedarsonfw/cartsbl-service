@@ -33,7 +33,7 @@ services:
         find /mnt-backups -type f -exec chmod 664 {} + 2>/dev/null || true
 
   chirpstack:
-    image: leedarson/cartsbl:${ARCH}-v2.12.0
+    image: leedarson/cartsbl:${ARCH}-v2.13.0
     user: "1000:1000"
     command: -c /etc/chirpstack
     restart: unless-stopped

@@ -68,15 +68,15 @@
   "panels": [
     {
       "type": "stat",
-      "title": "Broker connection up",
+      "title": "Exporter status",
       "id": 1,
       "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
       "targets": [
-        { "expr": "broker_connection_up", "refId": "A" }
+        { "expr": "up{job=\"mosquitto-exporter\"}", "refId": "A" }
       ],
       "options": {
-        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "reduceOptions": { "calcs": ["last"], "fields": "", "values": false },
         "colorMode": "value",
         "graphMode": "none",
         "justifyMode": "center",
@@ -94,7 +94,8 @@
               { "color": "red", "value": null },
               { "color": "green", "value": 1 }
             ]
-          }
+          },
+          "unit": "none"
         },
         "overrides": []
       }
@@ -106,9 +107,9 @@
       "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
       "targets": [
-        { "expr": "broker_clients_connected or vector(0)", "refId": "A" }
+        { "expr": "broker_clients_connected{job=\"mosquitto-exporter\"}", "refId": "A" }
       ],
-      "options": { "reduceOptions": { "calcs": ["lastNotNull"] } }
+      "options": { "reduceOptions": { "calcs": ["last"] } }
     },
     {
       "type": "stat",
@@ -117,9 +118,9 @@
       "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
       "targets": [
-        { "expr": "seconds_since_last_update", "refId": "A" }
+        { "expr": "(time() - timestamp(broker_uptime{job=\"mosquitto-exporter\"}))", "refId": "A" }
       ],
-      "options": { "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "options": { "reduceOptions": { "calcs": ["last"] } },
       "fieldConfig": {
         "defaults": {
           "unit": "s",
@@ -142,10 +143,10 @@
       "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
       "targets": [
-        { "expr": "broker_uptime or vector(0)", "refId": "A" }
+        { "expr": "broker_uptime{job=\"mosquitto-exporter\"}", "refId": "A" }
       ],
-      "options": { "reduceOptions": { "calcs": ["lastNotNull"] } },
-      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] }
+      "options": { "reduceOptions": { "calcs": ["last"] } },
+      "fieldConfig": { "defaults": { "unit": "s", "decimals": 0 }, "overrides": [] }
     },
     {
       "type": "timeseries",

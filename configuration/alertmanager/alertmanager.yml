@@ -4,7 +4,7 @@ global:
   smtp_from: 2b_send@leedarson.com
   smtp_require_tls: true
   smtp_auth_username: 2b_send@leedarson.com
-  smtp_auth_password: 05598f0866-505ce5ac8e-67916f1dd1-4f5691d9d9-5878
+  smtp_auth_password: enc1:2zFRN86SvEPy3EBVYYUIxprx4JFwWlhrv48jHQslc_G1VajiN3ID5lLa7mLAilTv5YPm1U76u9zb5rhkQ09ZqqqtH24ce-nhRkWcUQ
 
 route:
   receiver: email
@@ -12,6 +12,7 @@ route:
   - alertname
   - job
   - instance
+  - gateway_id
   group_wait: 30s
   group_interval: 10m
   repeat_interval: 24h

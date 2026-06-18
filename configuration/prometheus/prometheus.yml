@@ -9,7 +9,7 @@ alerting:
     - static_configs:
         - targets: ["alertmanager:9093"]
 
-# ChirpStack overwrites chirpstack-active.yml when alert_settings DB rules exist; otherwise it copies host-alerts.yml.
+# ChirpStack writes chirpstack-active.yml (UI/DB host + gateway rules plus merged service-alerts.yml).
 rule_files:
   - /etc/prometheus/alerts-sync/chirpstack-active.yml
 

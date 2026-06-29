@@ -15,16 +15,17 @@ services:
       - ./data/prometheus-rules:/mnt
       - ./data/alertmanager-sync:/mnt-am
       - ./data/chirpstack-backups:/mnt-backups
+      - ./data/system_ota:/mnt-ota
       - ./configuration/alertmanager:/src-am:ro
     command:
       - |
         set -e
-        mkdir -p /mnt /mnt-am /mnt-backups
+        mkdir -p /mnt /mnt-am /mnt-backups /mnt-ota/packages
         if [ ! -s /mnt-am/chirpstack-active.yml ]; then
           cp /src-am/alertmanager.yml /mnt-am/chirpstack-active.yml
         fi
-        chown -R 1000:1000 /mnt /mnt-am /mnt-backups
-        chmod 2775 /mnt /mnt-am /mnt-backups
+        chown -R 1000:1000 /mnt /mnt-am /mnt-backups /mnt-ota
+        chmod 2775 /mnt /mnt-am /mnt-backups /mnt-ota /mnt-ota/packages
         find /mnt -mindepth 1 -type d -exec chmod 2775 {} + 2>/dev/null || true
         find /mnt -type f -exec chmod 664 {} + 2>/dev/null || true
         find /mnt-am -mindepth 1 -type d -exec chmod 2775 {} + 2>/dev/null || true
@@ -47,6 +48,7 @@ services:
       # Default Alertmanager YAML (read-only); active file is written under ./data/alertmanager-sync.
       - ./configuration/alertmanager:/var/application/alertmanager/config:ro
       - ./data/alertmanager-sync:/var/lib/chirpstack/alertmanager
+      - ./data/system_ota:/data/system_ota
       # Mount host sysfs so backup_s3 can read the host NIC MAC (not docker-assigned veth MACs).
       - /sys:/host/sys:ro
       # Mount host procfs so backup_s3 can read host default route (avoid container namespace).
@@ -78,6 +80,9 @@ services:
       - CHIRPSTACK_PRIMARY_MAC=${CHIRPSTACK_PRIMARY_MAC}
       # Host IANA timezone for backup display/schedule when DB timezone is unset (computed by run.sh).
       - CHIRPSTACK_HOST_TIMEZONE=${CHIRPSTACK_HOST_TIMEZONE}
+      # Path to extension flag file on the device. When non-empty and the file exists,
+      # extended features (backup, alerts, monitor UI, system OTA) are enabled.
+      - CHIRPSTACK_EXTENSION_FILE=${CHIRPSTACK_EXTENSION_FILE:-}  # default empty
     ports:
       - "${CHIRPSTACK_PORT}:8080"
     networks:

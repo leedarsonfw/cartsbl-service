@@ -90,7 +90,7 @@ services:
         cat /mnt/prometheus/prometheus.yml
 
   portainer:
-    image: portainer/portainer-ce:latest
+    image: portainer/portainer-ce:v2.39.2
     container_name: portainer
     restart: unless-stopped
     ports:
@@ -109,7 +109,7 @@ services:
   # ChirpStack writes chirpstack-active.yml from DB rules; prometheus.yml rule_files must point to that file.
   # Alertmanager loads ./data/alertmanager-sync/chirpstack-active.yml (seeded by basic-data-init; ChirpStack overwrites from UI/DB).
   prometheus:
-    image: prom/prometheus:latest
+    image: prom/prometheus:v3.12.0
     container_name: prometheus
     restart: unless-stopped
     ports:
@@ -132,7 +132,7 @@ services:
         condition: service_completed_successfully
 
   alertmanager:
-    image: prom/alertmanager:latest
+    image: prom/alertmanager:v0.32.1
     container_name: alertmanager
     restart: unless-stopped
     ports:
@@ -149,7 +149,7 @@ services:
         condition: service_completed_successfully
 
   grafana:
-    image: grafana/grafana:latest
+    image: grafana/grafana:v13.0.1
     container_name: grafana
     restart: unless-stopped
     ports:
@@ -175,7 +175,7 @@ services:
         condition: service_completed_successfully
 
   node-exporter:
-    image: prom/node-exporter:latest
+    image: prom/node-exporter:v1.11.1
     container_name: node-exporter
     restart: unless-stopped
     ports:
@@ -217,7 +217,7 @@ services:
       - monitor-net
 
   mosquitto-exporter:
-    image: ${MOSQUITTO_EXPORTER_IMAGE:-sapcc/mosquitto-exporter:latest}
+    image: ${MOSQUITTO_EXPORTER_IMAGE:-sapcc/mosquitto-exporter:v0.8.0}
     container_name: mosquitto-exporter
     restart: unless-stopped
     environment:

@@ -86,10 +86,9 @@
 # Port must match the `chirpstack` scrape target in prometheus.yml (e.g. chirpstack:9091).
 [monitoring]
   bind="0.0.0.0:9091"
-  # Path to an extension flag file. When non-empty and the file exists on the device,
-  # extended features (backup, alerts, monitor UI, system OTA) are enabled.
-  # Set via CHIRPSTACK_EXTENSION_FILE in docker-compose .env.
-  flag_file_path="$CHIRPSTACK_EXTENSION_FILE"
+  # Extended features (backup, alerts, monitor UI, system OTA) are enabled when
+  # the CHIRPSTACK_OPS_EXTENSION_FLAG env var is set to "true".
+  # Set via CHIRPSTACK_OPS_EXTENSION_FLAG in docker-compose .env.
 
 
 [integration]
@@ -117,5 +116,4 @@
 
   # Path to RSA public key for signature verification.
   # The key must be in PEM format (PKCS#8 or PKCS#1).
-  # Example: /etc/chirpstack/public_key.pem
   public_key_path = "/etc/chirpstack/public_key.pem"

@@ -7,7 +7,7 @@ services:
   # Same logic as docker-basic-compose basic-data-init, but only ./data/prometheus-rules (main stack has no Grafana/Prometheus here).
   basic-data-init:
     # Reuse postgres:14-alpine (same as postgres/backup-runner) so offline env need not pull alpine.
-    image: postgres:14-alpine
+    image: postgres:14-alpine3.21
     user: "0:0"
     restart: "no"
     entrypoint: ["/bin/sh", "-c"]
@@ -96,7 +96,7 @@ services:
   # installed from pre-downloaded .apk packages (compressed as packages.tar.gz)
   # so no runtime network access is required.
   backup-runner:
-    image: postgres:14-alpine
+    image: postgres:14-alpine3.21
     restart: unless-stopped
     volumes:
       - ./data/chirpstack-backups:/var/lib/chirpstack/backups
@@ -160,7 +160,7 @@ services:
           memory: 512M
 
   postgres:
-    image: postgres:14-alpine
+    image: postgres:14-alpine3.21
     restart: unless-stopped
     volumes:
       - ./configuration/postgresql/initdb:/docker-entrypoint-initdb.d

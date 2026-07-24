@@ -34,7 +34,7 @@ services:
         find /mnt-backups -type f -exec chmod 664 {} + 2>/dev/null || true
 
   chirpstack:
-    image: leedarson/cartsbl:${ARCH}-v2.14.0
+    image: leedarson/cartsbl:${ARCH}-v2.15.01
     user: "1000:1000"
     command: -c /etc/chirpstack
     restart: unless-stopped
@@ -80,9 +80,6 @@ services:
       - CHIRPSTACK_PRIMARY_MAC=${CHIRPSTACK_PRIMARY_MAC}
       # Host IANA timezone for backup display/schedule when DB timezone is unset (computed by run.sh).
       - CHIRPSTACK_HOST_TIMEZONE=${CHIRPSTACK_HOST_TIMEZONE}
-      # Set to "true" to enable extended features (backup, alerts, monitor UI, system OTA).
-      # Default is empty (disabled). Must be "true" (string) to enable.
-      - CHIRPSTACK_OPS_EXTENSION_FLAG=true  # default empty = disabled
     ports:
       - "${CHIRPSTACK_PORT}:8080"
     networks:

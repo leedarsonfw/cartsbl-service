@@ -92,21 +92,24 @@ services:
           memory: 512M
 
   # Provides pg_dump for backup management without rebuilding ChirpStack image.
+  # postgres:14-alpine already ships pg_dump / pg_restore; python3 is
+  # installed from pre-downloaded .apk packages (compressed as packages.tar.gz)
+  # so no runtime network access is required.
   backup-runner:
     image: postgres:14-alpine
     restart: unless-stopped
     volumes:
       - ./data/chirpstack-backups:/var/lib/chirpstack/backups
       - ./backup-runner/runner.py:/runner.py:ro
+      - ./backup-runner/packages.tar.gz:/tmp/packages.tar.gz:ro
     environment:
       - RUNNER_HOST=0.0.0.0
       - RUNNER_PORT=8081
     command: >
       sh -c "
-        echo 'http://mirrors.aliyun.com/alpine/v3.18/main' > /etc/apk/repositories &&
-        echo 'http://mirrors.aliyun.com/alpine/v3.18/community' >> /etc/apk/repositories &&
-        apk update --no-cache &&
-        apk add --no-cache postgresql15-client python3 &&
+        mkdir -p /tmp/packages &&
+        tar -xzf /tmp/packages.tar.gz -C /tmp/packages &&
+        apk add --no-network --allow-untrusted /tmp/packages/*.apk &&
         python3 /runner.py
       "
 

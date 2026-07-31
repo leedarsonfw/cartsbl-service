@@ -90,7 +90,7 @@ services:
         cat /mnt/prometheus/prometheus.yml
 
   portainer:
-    image: portainer/portainer-ce:2.39.2
+    image: portainer/portainer-ce:v2.39.2
     container_name: portainer
     restart: unless-stopped
     ports:
@@ -149,7 +149,7 @@ services:
         condition: service_completed_successfully
 
   grafana:
-    image: grafana/grafana:13.0.1
+    image: grafana/grafana:v13.0.1
     container_name: grafana
     restart: unless-stopped
     ports:
@@ -218,7 +218,7 @@ services:
       - monitor-net
 
   mosquitto-exporter:
-    image: ${MOSQUITTO_EXPORTER_IMAGE:-sapcc/mosquitto-exporter:0.8.0}
+    image: ${MOSQUITTO_EXPORTER_IMAGE:-sapcc/mosquitto-exporter:v0.8.0}
     container_name: mosquitto-exporter
     restart: unless-stopped
     environment:

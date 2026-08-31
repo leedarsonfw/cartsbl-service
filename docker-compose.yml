@@ -1,13 +1,8 @@
-networks:
-  monitor-net:
-    name: monitor-net
-    driver: bridge
-
 services:
   # Same logic as docker-basic-compose basic-data-init, but only ./data/prometheus-rules (main stack has no Grafana/Prometheus here).
   basic-data-init:
     # Reuse postgres:14-alpine (same as postgres/backup-runner) so offline env need not pull alpine.
-    image: postgres:14-alpine
+    image: postgres:14-alpine3.21
     user: "0:0"
     restart: "no"
     entrypoint: ["/bin/sh", "-c"]
@@ -17,24 +12,11 @@ services:
       - ./data/chirpstack-backups:/mnt-backups
       - ./data/system_ota:/mnt-ota
       - ./configuration/alertmanager:/src-am:ro
-    command:
-      - |
-        set -e
-        mkdir -p /mnt /mnt-am /mnt-backups /mnt-ota/packages
-        if [ ! -s /mnt-am/chirpstack-active.yml ]; then
-          cp /src-am/alertmanager.yml /mnt-am/chirpstack-active.yml
-        fi
-        chown -R 1000:1000 /mnt /mnt-am /mnt-backups /mnt-ota
-        chmod 2775 /mnt /mnt-am /mnt-backups /mnt-ota /mnt-ota/packages
-        find /mnt -mindepth 1 -type d -exec chmod 2775 {} + 2>/dev/null || true
-        find /mnt -type f -exec chmod 664 {} + 2>/dev/null || true
-        find /mnt-am -mindepth 1 -type d -exec chmod 2775 {} + 2>/dev/null || true
-        find /mnt-am -type f -exec chmod 664 {} + 2>/dev/null || true
-        find /mnt-backups -mindepth 1 -type d -exec chmod 2775 {} + 2>/dev/null || true
-        find /mnt-backups -type f -exec chmod 664 {} + 2>/dev/null || true
+      - ./scripts/compose-data-init.sh:/src/compose-data-init.sh:ro
+    command: ["sh /src/compose-data-init.sh"]
 
   chirpstack:
-    image: leedarson/cartsbl:${ARCH}-v2.15.01
+    image: leedarson/cartsbl:${ARCH}-v2.16.0
     user: "1000:1000"
     command: -c /etc/chirpstack
     restart: unless-stopped
@@ -60,8 +42,6 @@ services:
     depends_on:
       postgres:
         condition: service_started
-      backup-runner:
-        condition: service_started
       emqx:
         condition: service_started
       redis:
@@ -74,41 +54,28 @@ services:
       - REDIS_HOST=redis
       - REDIS_PORT=${REDIS_PORT:-6379}
       - POSTGRESQL_HOST=postgres
-      - CHIRPSTACK_PGDUMP_RUNNER_URL=http://backup-runner:8081/pg_dump
-      - CHIRPSTACK_PGRESTORE_RUNNER_URL=http://backup-runner:8081/pg_restore
+      - CHIRPSTACK_PGDUMP_RUNNER_URL=http://host.docker.internal:8081/pg_dump
+      - CHIRPSTACK_PGRESTORE_RUNNER_URL=http://host.docker.internal:8081/pg_restore
       # Host-provided primary NIC MAC for S3 prefix fallback (computed by run.sh).
-      - CHIRPSTACK_PRIMARY_MAC=${CHIRPSTACK_PRIMARY_MAC}
+      - CHIRPSTACK_PRIMARY_MAC=${CHIRPSTACK_PRIMARY_MAC:-}
       # Host IANA timezone for backup display/schedule when DB timezone is unset (computed by run.sh).
-      - CHIRPSTACK_HOST_TIMEZONE=${CHIRPSTACK_HOST_TIMEZONE}
+      - CHIRPSTACK_HOST_TIMEZONE=${CHIRPSTACK_HOST_TIMEZONE:-Asia/Shanghai}
+    # backup-runner now lives in the basic monitoring stack; reach it via the host.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports:
       - "${CHIRPSTACK_PORT}:8080"
+      # Prometheus metrics ([monitoring] bind=0.0.0.0:9091). Published on the host so the
+      # monitoring stack can scrape via host.docker.internal:9091 — same as cluster mode
+      # (docker-stack.yml publishes 9091 with mode: host), keeping one prometheus.yml target.
+      - "9091:9091"
     networks:
-      - default
       - monitor-net
     deploy:
       resources:
         limits:
           cpus: '2'
           memory: 512M
-
-  # Provides pg_dump for backup management without rebuilding ChirpStack image.
-  backup-runner:
-    image: postgres:14-alpine
-    restart: unless-stopped
-    volumes:
-      - ./data/chirpstack-backups:/var/lib/chirpstack/backups
-      - ./backup-runner/runner.py:/runner.py:ro
-    environment:
-      - RUNNER_HOST=0.0.0.0
-      - RUNNER_PORT=8081
-    command: >
-      sh -c "
-        echo 'http://mirrors.aliyun.com/alpine/v3.18/main' > /etc/apk/repositories &&
-        echo 'http://mirrors.aliyun.com/alpine/v3.18/community' >> /etc/apk/repositories &&
-        apk update --no-cache &&
-        apk add --no-cache postgresql15-client python3 &&
-        python3 /runner.py
-      "
 
   chirpstack-gateway-bridge-basicstation-na:
     image: chirpstack/chirpstack-gateway-bridge:4
@@ -120,6 +87,8 @@ services:
       - ./configuration/chirpstack-gateway-bridge:/etc/chirpstack-gateway-bridge
     depends_on:
       - emqx
+    networks:
+      - monitor-net
     deploy:
       resources:
         limits:
@@ -136,6 +105,8 @@ services:
       - ./configuration/chirpstack-gateway-bridge:/etc/chirpstack-gateway-bridge
     depends_on:
       - emqx
+    networks:
+      - monitor-net
     deploy:
       resources:
         limits:
@@ -174,7 +145,6 @@ services:
           cpus: '1'
           memory: 128M
     networks:
-      - default
       - monitor-net
 
   redis:
@@ -192,7 +162,6 @@ services:
           memory: 128M
 
     networks:
-      - default
       - monitor-net
 
   emqx:
@@ -209,8 +178,12 @@ services:
           cpus: '1'
           memory: 128M
     networks:
-      - default
       - monitor-net
+
+networks:
+  monitor-net:
+    name: monitor-net
+    driver: bridge
 
 volumes:
   postgresqldata:

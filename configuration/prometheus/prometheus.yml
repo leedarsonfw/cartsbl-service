@@ -30,14 +30,26 @@ scrape_configs:
     static_configs:
       - targets: ["postgres-exporter:9187"]
 
-  # Mosquitto metrics via exporter (subscribes to $SYS/broker/#).
+  # BEGIN broker-job-mosquitto
+  # Mosquitto metrics via exporter (subscribes to $SYS/broker/#). Single-node (ONE_NODE=true) only.
   - job_name: "mosquitto-exporter"
     static_configs:
       - targets: ["mosquitto-exporter:9234"]
+  # END broker-job-mosquitto
+
+  # BEGIN broker-job-emqx
+  # EMQX (cluster stack) native Prometheus endpoint; no auth. Single-node mosquitto has no such endpoint.
+  - job_name: "emqx"
+    metrics_path: /api/v5/prometheus/stats
+    static_configs:
+      - targets: ["host.docker.internal:PLACEHOLDER_EMQX_WEB_PORT"]
+  # END broker-job-emqx
 
   # ChirpStack exposes Prometheus metrics on `[monitoring].bind` (path /metrics), not the gRPC API port.
+  # Single-node compose publishes 9091; cluster stack publishes 9091 (mode: host) on every node.
+  # Prometheus reaches either via the host, so both modes share this one target.
   - job_name: "chirpstack"
     metrics_path: /metrics
     static_configs:
-      - targets: ["chirpstack:9091"]
+      - targets: ["host.docker.internal:9091"]
 

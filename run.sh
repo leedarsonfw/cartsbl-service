@@ -84,6 +84,54 @@ function detect_host_primary_mac()
     return 1
 }
 
+function detect_host_primary_iface()
+{
+    local iface p
+    # Reuse the same physical-interface rules as detect_host_primary_mac.
+    _is_virtual_iface() {
+        case "$1" in
+            lo|docker*|br-*|veth*|virbr*|tun*|tap*|wg*) return 0 ;;
+        esac
+        if [ -f "/sys/class/net/$1/uevent" ] && grep -q "^DEVTYPE=veth$" "/sys/class/net/$1/uevent" 2>/dev/null; then
+            return 0
+        fi
+        return 1
+    }
+
+    _is_physical_up() {
+        [ -e "/sys/class/net/$1/device" ] || return 1
+        [ "$(cat "/sys/class/net/$1/operstate" 2>/dev/null)" = "up" ] || return 1
+        return 0
+    }
+
+    # 1) Prefer physical+UP interfaces (same heuristic as MAC detection).
+    for p in /sys/class/net/*/address; do
+        iface=$(basename "$(dirname "$p")")
+        _is_virtual_iface "${iface}" && continue
+        _is_physical_up "${iface}" || continue
+        echo "${iface}"
+        return 0
+    done
+
+    # 2) Next, default-route interface(s) but skip virtual ones.
+    while read -r iface; do
+        [ -z "${iface}" ] && continue
+        _is_virtual_iface "${iface}" && continue
+        echo "${iface}"
+        return 0
+    done < <(ip -o route show default 0.0.0.0/0 2>/dev/null | awk '{for(i=1;i<=NF;i++) if ($i=="dev") {print $(i+1)}}')
+
+    # 3) Final fallback: first non-virtual NIC name.
+    for p in /sys/class/net/*/address; do
+        iface=$(basename "$(dirname "$p")")
+        _is_virtual_iface "${iface}" && continue
+        echo "${iface}"
+        return 0
+    done
+
+    return 1
+}
+
 function update_env_primary_mac()
 {
     local mac
@@ -298,6 +346,13 @@ function check_is_master_node()
 function start()
 {
     check_is_master_node
+    # Ensure ChirpStack's writable data dirs exist with 1000:1000 ownership before deploy.
+    # Bind mounts for missing paths are created as root by Docker, which breaks the
+    # chirpstack container (runs as UID 1000) writing alertmanager config / system OTA.
+    for d in data/prometheus-rules data/alertmanager-sync data/chirpstack-backups data/system_ota; do
+        mkdir -p ${curr_path}/${d}
+        sudo chown -R 1000:1000 ${curr_path}/${d}
+    done
     docker stack deploy --resolve-image never -c docker-stack.yml ${stack_name}
 }
 
@@ -450,20 +505,33 @@ function create_keepalived_config()
     ip2=$4
 
     priority=$((100 - node * 10))
-    
+
+    # Use the host's real physical NIC for the VRRP instance (not a hardcoded eth0).
+    # detect_host_primary_iface reuses the physical-interface heuristic from MAC detection.
+    iface=$(detect_host_primary_iface)
+    if [ -z "${iface}" ]; then
+        log_warn "Could not detect primary NIC, defaulting keepalived interface to eth0"
+        iface="eth0"
+    fi
+
     cat > ${curr_path}/stack/keepalived-${node}.conf << EOF
 vrrp_instance VI_1 {
     state BACKUP
-    interface eth0
+    interface ${iface}
     virtual_router_id 51
     priority ${priority}
+    nopreempt
     advert_int 1
     authentication {
         auth_type PASS
         auth_pass secret
     }
+
+    use_vmac vrrp.51
+    vmac_xmit_base
+
     virtual_ipaddress {
-        ${VIP}/24
+        ${VIP}/32
     }
     unicast_src_ip ${ip0}
     unicast_peer {
@@ -554,11 +622,18 @@ function setup()
         exit 1
     fi
 
-    # clean 
+    # clean
     rm -rf ${curr_path}/stack
     mkdir -p ${curr_path}/stack
     mkdir -p ${curr_path}/storage/tmp
     mkdir -p ${curr_path}/storage/logs
+
+    # ChirpStack (UID 1000) needs writable data dirs on EVERY node (global mode).
+    # Missing bind-mount sources are created as root by Docker, breaking writes.
+    for d in data/prometheus-rules data/alertmanager-sync data/chirpstack-backups data/system_ota; do
+        mkdir -p ${curr_path}/${d}
+        sudo chown -R 1000:1000 ${curr_path}/${d}
+    done
 
     if [ ${node} -eq 0 ]; then
         create_keepalived_config ${node} ${CLUSTER_NODE0_IP} ${CLUSTER_NODE1_IP} ${CLUSTER_NODE2_IP}
@@ -616,6 +691,15 @@ function basic()
         exit 0
     fi
 
+    # Docker bind-mounts a missing source path as a DIRECTORY, which breaks Alertmanager's
+    # file mount ("not a directory") and defeats basic-data-init's seed. Pre-create the
+    # seeded file BEFORE `up` so the mount source is a regular file from the start.
+    mkdir -p ${curr_path}/data/alertmanager-sync
+    if [ ! -f ${curr_path}/data/alertmanager-sync/chirpstack-active.yml ]; then
+        cp ${curr_path}/configuration/alertmanager/alertmanager.yml \
+           ${curr_path}/data/alertmanager-sync/chirpstack-active.yml
+    fi
+
     docker compose -f docker-basic-compose.yml up -d
 }
 
@@ -667,6 +751,26 @@ function network_clean()
     docker network prune -f
 }
 
+function ensure_lorawan_net()
+{
+    # The shared overlay network `lorawan-net` is used by the business stack
+    # (docker-compose.yml / docker-stack.yml) AND the monitoring stack
+    # (docker-basic-compose.yml) so prometheus/alertmanager can reach
+    # chirpstack/backup-runner across projects. Overlay networks require swarm
+    # mode, so initialize swarm first if needed (idempotent).
+    if ! docker network inspect lorawan-net >/dev/null 2>&1; then
+        # Ensure swarm mode is active (idempotent; no-op if already in a swarm).
+        if [ "$(docker info --format '{{.Swarm.LocalNodeState}}' 2>/dev/null)" != "active" ]; then
+            log_warn "Initializing Docker swarm mode to host the shared overlay network ..."
+            docker swarm init --advertise-addr ${CLUSTER_NODE0_IP} >/dev/null 2>&1 || \
+                log_warn "swarm init skipped/failed (may already be in a swarm)"
+        fi
+        log_warn "Creating shared overlay network lorawan-net ..."
+        docker network create --driver overlay --attachable lorawan-net >/dev/null 2>&1 || \
+            log_warn "lorawan-net already exists or creation failed"
+    fi
+}
+
 function one_node_start()
 {
     update_env_primary_mac
@@ -674,6 +778,7 @@ function one_node_start()
     if [ ! -d ${CURR_PATH}/storage/postgresqldata ]; then
         sudo tar zxvf postgresqldata.tgz -C storage
     fi
+    ensure_lorawan_net
     ARCH=$(uname -m) docker compose -f docker-compose.yml up -d
 }
 

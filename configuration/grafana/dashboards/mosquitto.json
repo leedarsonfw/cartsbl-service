@@ -73,7 +73,7 @@
       "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
       "targets": [
-        { "expr": "up{job=\"mosquitto-exporter\"}", "refId": "A" }
+        { "expr": "up{job=\"emqx\"} or up{job=\"mosquitto-exporter\"}", "refId": "A" }
       ],
       "options": {
         "reduceOptions": { "calcs": ["last"], "fields": "", "values": false },
@@ -107,18 +107,18 @@
       "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
       "targets": [
-        { "expr": "broker_clients_connected{job=\"mosquitto-exporter\"}", "refId": "A" }
+        { "expr": "emqx_connections_count{job=\"emqx\"} or broker_clients_connected{job=\"mosquitto-exporter\"}", "refId": "A" }
       ],
       "options": { "reduceOptions": { "calcs": ["last"] } }
     },
     {
       "type": "stat",
-      "title": "Seconds since last $SYS update",
+      "title": "Seconds since last update",
       "id": 3,
       "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
       "targets": [
-        { "expr": "(time() - timestamp(broker_uptime{job=\"mosquitto-exporter\"}))", "refId": "A" }
+        { "expr": "(time() - timestamp(up{job=\"emqx\"})) or (time() - timestamp(broker_uptime{job=\"mosquitto-exporter\"}))", "refId": "A" }
       ],
       "options": { "reduceOptions": { "calcs": ["last"] } },
       "fieldConfig": {
@@ -139,11 +139,12 @@
     {
       "type": "stat",
       "title": "Uptime",
+      "description": "集群(EMQX)模式 EMQX 不暴露进程 uptime 指标，显示宿主机 uptime (node_boot_time_seconds) 作为近似",
       "id": 4,
       "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
       "targets": [
-        { "expr": "broker_uptime{job=\"mosquitto-exporter\"}", "refId": "A" }
+        { "expr": "(time() - process_start_time_seconds{job=\"emqx\"}) or broker_uptime{job=\"mosquitto-exporter\"} or (time() - node_boot_time_seconds{job=\"node-exporter\"})", "refId": "A" }
       ],
       "options": { "reduceOptions": { "calcs": ["last"] } },
       "fieldConfig": { "defaults": { "unit": "s", "decimals": 0 }, "overrides": [] }
@@ -155,8 +156,8 @@
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
       "targets": [
-        { "expr": "rate(broker_messages_received[5m])", "legendFormat": "received", "refId": "A" },
-        { "expr": "rate(broker_messages_sent[5m])", "legendFormat": "sent", "refId": "B" }
+        { "expr": "rate(emqx_messages_received{job=\"emqx\"}[5m]) or rate(broker_messages_received{job=\"mosquitto-exporter\"}[5m])", "legendFormat": "received", "refId": "A" },
+        { "expr": "rate(emqx_messages_sent{job=\"emqx\"}[5m]) or rate(broker_messages_sent{job=\"mosquitto-exporter\"}[5m])", "legendFormat": "sent", "refId": "B" }
       ],
       "fieldConfig": { "defaults": { "unit": "ops" }, "overrides": [] }
     },
@@ -167,9 +168,9 @@
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
       "targets": [
-        { "expr": "rate(broker_publish_messages_received[5m])", "legendFormat": "pub received", "refId": "A" },
-        { "expr": "rate(broker_publish_messages_sent[5m])", "legendFormat": "pub sent", "refId": "B" },
-        { "expr": "rate(broker_publish_messages_dropped[5m])", "legendFormat": "pub dropped", "refId": "C" }
+        { "expr": "rate(emqx_packets_publish_received{job=\"emqx\"}[5m]) or rate(broker_publish_messages_received{job=\"mosquitto-exporter\"}[5m])", "legendFormat": "pub received", "refId": "A" },
+        { "expr": "rate(emqx_packets_publish_sent{job=\"emqx\"}[5m]) or rate(broker_publish_messages_sent{job=\"mosquitto-exporter\"}[5m])", "legendFormat": "pub sent", "refId": "B" },
+        { "expr": "rate(emqx_messages_dropped{job=\"emqx\"}[5m]) or rate(broker_publish_messages_dropped{job=\"mosquitto-exporter\"}[5m])", "legendFormat": "pub dropped", "refId": "C" }
       ],
       "fieldConfig": { "defaults": { "unit": "ops" }, "overrides": [] }
     },
@@ -180,8 +181,8 @@
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
       "targets": [
-        { "expr": "rate(broker_bytes_received[5m])", "legendFormat": "received", "refId": "A" },
-        { "expr": "rate(broker_bytes_sent[5m])", "legendFormat": "sent", "refId": "B" }
+        { "expr": "rate(emqx_bytes_received{job=\"emqx\"}[5m]) or rate(broker_bytes_received{job=\"mosquitto-exporter\"}[5m])", "legendFormat": "received", "refId": "A" },
+        { "expr": "rate(emqx_bytes_sent{job=\"emqx\"}[5m]) or rate(broker_bytes_sent{job=\"mosquitto-exporter\"}[5m])", "legendFormat": "sent", "refId": "B" }
       ],
       "fieldConfig": { "defaults": { "unit": "Bps" }, "overrides": [] }
     },
@@ -192,8 +193,8 @@
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 },
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
       "targets": [
-        { "expr": "rate(broker_publish_bytes_received[5m])", "legendFormat": "pub received", "refId": "A" },
-        { "expr": "rate(broker_publish_bytes_sent[5m])", "legendFormat": "pub sent", "refId": "B" }
+        { "expr": "rate(emqx_bytes_received{job=\"emqx\"}[5m]) or rate(broker_publish_bytes_received{job=\"mosquitto-exporter\"}[5m])", "legendFormat": "pub received", "refId": "A" },
+        { "expr": "rate(emqx_bytes_sent{job=\"emqx\"}[5m]) or rate(broker_publish_bytes_sent{job=\"mosquitto-exporter\"}[5m])", "legendFormat": "pub sent", "refId": "B" }
       ],
       "fieldConfig": { "defaults": { "unit": "Bps" }, "overrides": [] }
     },
@@ -204,8 +205,8 @@
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 20 },
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
       "targets": [
-        { "expr": "broker_clients_total or vector(0)", "legendFormat": "clients total", "refId": "A" },
-        { "expr": "broker_clients_maximum or vector(0)", "legendFormat": "clients maximum", "refId": "B" }
+        { "expr": "emqx_connections_count{job=\"emqx\"} or broker_clients_total{job=\"mosquitto-exporter\"} or vector(0)", "legendFormat": "clients total", "refId": "A" },
+        { "expr": "emqx_connections_max{job=\"emqx\"} or broker_clients_maximum{job=\"mosquitto-exporter\"} or vector(0)", "legendFormat": "clients maximum", "refId": "B" }
       ],
       "fieldConfig": { "defaults": { "unit": "none" }, "overrides": [] }
     },
@@ -216,7 +217,7 @@
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 20 },
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
       "targets": [
-        { "expr": "up{job=\"mosquitto-exporter\"}", "legendFormat": "prom scrape up", "refId": "A" }
+        { "expr": "up{job=\"emqx\"} or up{job=\"mosquitto-exporter\"}", "legendFormat": "prom scrape up", "refId": "A" }
       ],
       "fieldConfig": { "defaults": { "min": 0, "max": 1 }, "overrides": [] }
     }
@@ -224,11 +225,11 @@
   "refresh": "10s",
   "schemaVersion": 37,
   "style": "dark",
-  "tags": ["mosquitto", "mqtt"],
+  "tags": ["mosquitto", "emqx", "mqtt"],
   "time": { "from": "now-6h", "to": "now" },
   "timepicker": {},
   "timezone": "",
-  "title": "Mosquitto",
+  "title": "MQTT Broker",
   "uid": "mosquitto",
   "version": 1,
   "weekStart": ""

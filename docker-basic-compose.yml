@@ -15,82 +15,20 @@ services:
       - ./data/portainer:/mnt/portainer
       - ./data/prometheus-rules:/mnt/prometheus-rules
       - ./data/alertmanager-sync:/mnt/alertmanager-sync
+      - ./data/chirpstack-backups:/mnt/chirpstack-backups
+      - ./data/system_ota:/mnt/system_ota
       - ./configuration/alertmanager:/src/alertmanager:ro
       - ./configuration/prometheus/prometheus.yml:/src/prometheus-template.yml:ro
+      - ./scripts/basic-data-init.sh:/src/basic-data-init.sh:ro
       - .:/mnt/service:rw
-    command:
-      - |
-        set -e
-        mkdir -p /mnt/prometheus /mnt/grafana /mnt/portainer /mnt/prometheus-rules /mnt/alertmanager-sync
-        if [ ! -s /mnt/alertmanager-sync/chirpstack-active.yml ]; then
-          cp /src/alertmanager/alertmanager.yml /mnt/alertmanager-sync/chirpstack-active.yml
-        fi
-        chown -R 65534:65534 /mnt/prometheus
-        chown -R 472:472 /mnt/grafana
-        chown -R 0:0 /mnt/portainer
-        chown -R 1000:1000 /mnt/prometheus-rules
-        chown -R 1000:1000 /mnt/alertmanager-sync
-        chmod 2775 /mnt/prometheus-rules
-        chmod 2775 /mnt/alertmanager-sync
-        find /mnt/prometheus-rules -mindepth 1 -type d -exec chmod 2775 {} + 2>/dev/null || true
-        find /mnt/prometheus-rules -type f -exec chmod 664 {} + 2>/dev/null || true
-        find /mnt/alertmanager-sync -mindepth 1 -type d -exec chmod 2775 {} + 2>/dev/null || true
-        find /mnt/alertmanager-sync -type f -exec chmod 664 {} + 2>/dev/null || true
-        host_mac=""
-        set +e
-        for p in /sys/class/net/*/address; do
-          [ -f "$$p" ] || continue
-          iface=$$(basename "$$(dirname "$$p")")
-          case "$$iface" in lo|docker*|br-*|veth*|virbr*|tun*|tap*|wg*) continue ;; esac
-          [ -e "/sys/class/net/$$iface/device" ] || continue
-          [ "$$(cat "/sys/class/net/$$iface/operstate" 2>/dev/null)" = "up" ] || continue
-          m=$$(cat "$$p" 2>/dev/null | tr -d '\r' | tr '[:upper:]' '[:lower:]')
-          if [ -n "$$m" ] && [ "$$m" != "00:00:00:00:00:00" ] && echo "$$m" | grep -qE '^([0-9a-f]{2}:){5}[0-9a-f]{2}$$'; then
-            host_mac="$$m"
-            break
-          fi
-        done
-        if [ -z "$$host_mac" ]; then
-          for iface in $$(awk 'NR>1 && $$2=="00000000" {print $$1}' /proc/net/route 2>/dev/null | sort -u); do
-            [ -z "$$iface" ] && continue
-            case "$$iface" in lo|docker*|br-*|veth*|virbr*|tun*|tap*|wg*) continue ;; esac
-            addr="/sys/class/net/$$iface/address"
-            [ -f "$$addr" ] || continue
-            m=$$(cat "$$addr" 2>/dev/null | tr -d '\r' | tr '[:upper:]' '[:lower:]')
-            if [ -n "$$m" ] && [ "$$m" != "00:00:00:00:00:00" ] && echo "$$m" | grep -qE '^([0-9a-f]{2}:){5}[0-9a-f]{2}$$'; then
-              host_mac="$$m"
-              break
-            fi
-          done
-        fi
-        if [ -z "$$host_mac" ]; then
-          for p in /sys/class/net/*/address; do
-            [ -f "$$p" ] || continue
-            iface=$$(basename "$$(dirname "$$p")")
-            case "$$iface" in lo|docker*|br-*|veth*|virbr*|tun*|tap*|wg*) continue ;; esac
-            m=$$(cat "$$p" 2>/dev/null | tr -d '\r' | tr '[:upper:]' '[:lower:]')
-            if [ -n "$$m" ] && [ "$$m" != "00:00:00:00:00:00" ] && echo "$$m" | grep -qE '^([0-9a-f]{2}:){5}[0-9a-f]{2}$$'; then
-              host_mac="$$m"
-              break
-            fi
-          done
-        fi
-        set -e
-        [ -n "$$host_mac" ] || host_mac="unknown"
-        echo "Detected MAC: $$host_mac"
-        if [ "$$host_mac" != "unknown" ]; then
-          dotenv=/mnt/service/.env
-          if [ -f "$$dotenv" ] && grep -q '^CHIRPSTACK_PRIMARY_MAC=' "$$dotenv" 2>/dev/null; then
-            sed -i "s/^CHIRPSTACK_PRIMARY_MAC=.*/CHIRPSTACK_PRIMARY_MAC=$$host_mac/" "$$dotenv"
-          else
-            echo "CHIRPSTACK_PRIMARY_MAC=$$host_mac" >> "$$dotenv"
-          fi
-        fi
-        awk -v m="$$host_mac" '{gsub(/PLACEHOLDER_MAC_ADDRESS/, m); print}' /src/prometheus-template.yml > /mnt/prometheus/prometheus.yml
-        cat /mnt/prometheus/prometheus.yml
+    # NOTE: keep as a SINGLE-element list. With entrypoint ["/bin/sh","-c"], a plain string
+    # like "sh /src/basic-data-init.sh" is shell-split into ["sh","/src/basic-data-init.sh"],
+    # so sh -c only receives "sh" (the rest become $0..) and the script never runs.
+    # A single string element keeps the whole invocation as the sh -c command string.
+    command: ["sh /src/basic-data-init.sh"]
 
   portainer:
-    image: portainer/portainer-ce:v2.39.2
+    image: portainer/portainer-ce:2.39.2
     container_name: portainer
     restart: unless-stopped
     ports:
@@ -99,7 +37,6 @@ services:
       - ./data/portainer:/data
       - /var/run/docker.sock:/var/run/docker.sock
     networks:
-      - portainer-net
       - monitor-net
     depends_on:
       basic-data-init:
@@ -125,6 +62,8 @@ services:
       - '--web.enable-lifecycle'
     networks:
       - monitor-net
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       alertmanager:
         condition: service_started
@@ -149,7 +88,7 @@ services:
         condition: service_completed_successfully
 
   grafana:
-    image: grafana/grafana:v13.0.1
+    image: grafana/grafana:13.0.1
     container_name: grafana
     restart: unless-stopped
     ports:
@@ -201,8 +140,12 @@ services:
     networks:
       - monitor-net
     environment:
-      - REDIS_ADDR=redis://${REDIS_HOST:-redis}:${REDIS_PORT:-6379}
+      # Cluster stack: redis is fronted by haproxy on ${REDIS_FRONTEND_PORT}; reach it via the host.
+      # Single-node compose publishes ${REDIS_PORT:-6379}, so the same host port works for both.
+      - REDIS_ADDR=redis://host.docker.internal:${REDIS_FRONTEND_PORT:-6379}
       # - REDIS_PASSWORD=yourpassword
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports:
       - "${REDIS_EXPORTER_PORT:-9121}:9121/tcp"
 
@@ -211,24 +154,59 @@ services:
     container_name: postgres-exporter
     restart: unless-stopped
     environment:
-      - DATA_SOURCE_NAME=postgresql://${POSTGRES_USER:-chirpstack}:${POSTGRES_PASSWORD:-chirpstack}@${POSTGRES_HOST:-cartsbl-service-postgres-1}:${POSTGRES_PORT_INNER:-5432}/${POSTGRES_DB:-chirpstack}?sslmode=disable
+      # Cluster stack: postgres is fronted by haproxy on ${POSTGRES_PORT} published to the host;
+      # the exporter must not sit inside the backend postgres network. Reach it via host.docker.internal.
+      # Single-node compose publishes ${POSTGRES_PORT:-5432} too, so the same host port works for both.
+      - DATA_SOURCE_NAME=postgresql://${POSTGRES_USER:-chirpstack}:${POSTGRES_PASSWORD:-chirpstack}@host.docker.internal:${POSTGRES_PORT:-5432}/${POSTGRES_DB:-chirpstack}?sslmode=disable
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports:
       - "${POSTGRES_EXPORTER_PORT:-9187}:9187/tcp"
     networks:
       - monitor-net
 
   mosquitto-exporter:
-    image: ${MOSQUITTO_EXPORTER_IMAGE:-sapcc/mosquitto-exporter:v0.8.0}
+    image: ${MOSQUITTO_EXPORTER_IMAGE:-sapcc/mosquitto-exporter:0.8.0}
     container_name: mosquitto-exporter
     restart: unless-stopped
     environment:
-      - BROKER_ENDPOINT=tcp://emqx:${EMQX_PORT:-1883}
+      # Cluster stack: emqx publishes ${EMQX_PORT} in host mode per node; reach it via the host.
+      # Single-node compose publishes ${EMQX_PORT:-1883} too, so the same host port works for both.
+      - BROKER_ENDPOINT=tcp://host.docker.internal:${EMQX_PORT:-1883}
       # - MQTT_USER=
       # - MQTT_PASS=
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports:
       - "${MOSQUITTO_EXPORTER_PORT:-9234}:9234"
     networks:
       - monitor-net
+
+  # Provides pg_dump/pg_restore for backup management. Lives in the monitoring stack so the
+  # business stacks (docker-compose/docker-stack) don't each run their own runner.
+  # ChirpStack reaches it via host.docker.internal:8081 (exposed on the host).
+  backup-runner:
+    image: postgres:14-alpine3.21
+    container_name: backup-runner
+    restart: unless-stopped
+    ports:
+      - "${BACKUP_RUNNER_PORT:-8081}:8081/tcp"
+    volumes:
+      - ./data/chirpstack-backups:/var/lib/chirpstack/backups
+      - ./backup-runner/runner.py:/runner.py:ro
+      - ./backup-runner/packages.tar.gz:/tmp/packages.tar.gz:ro      
+    environment:
+      - RUNNER_HOST=0.0.0.0
+      - RUNNER_PORT=8081
+    networks:
+      - monitor-net
+    command: >
+      sh -c "
+        mkdir -p /tmp/packages &&
+        tar -xzf /tmp/packages.tar.gz -C /tmp/packages &&
+        apk add --no-network --allow-untrusted /tmp/packages/*.apk &&
+        python3 /runner.py
+      "
 
  # keepalived:
  #   image: ${KEEPALIVED_IMAGE}
@@ -246,8 +224,6 @@ services:
  #     - portainer
 
 networks:
-  portainer-net:
-    driver: bridge
   monitor-net:
     name: monitor-net
     driver: bridge

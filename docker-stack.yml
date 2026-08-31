@@ -1,47 +1,92 @@
 services:
   chirpstack:
-    image: leedarson/cartsbl:${ARCH}-v2.3.0
+    image: leedarson/cartsbl:${ARCH}-v1.8.4
+    user: "1000:1000"
     command: -c /etc/chirpstack
     deploy:
       mode: global
     volumes:
       - ${CURR_PATH}/configuration/chirpstack:/etc/chirpstack
-      # Mount host sysfs so backup_s3 can read the host NIC MAC (not docker-assigned veth MACs).
-      - /sys:/host/sys:ro
+      # Backup dir shared with backup-runner (UI writes dumps here; runner reads/writes too).
+      - ${CURR_PATH}/data/chirpstack-backups:/var/lib/chirpstack/backups
+      # Writable alertmanager + prometheus rule sync dirs (same bind mounts as monitoring stack).
+      - ${CURR_PATH}/data/prometheus-rules:/var/lib/chirpstack/prometheus-rules
+      - ${CURR_PATH}/data/alertmanager-sync:/var/lib/chirpstack/alertmanager
+      - ${CURR_PATH}/configuration/alertmanager:/var/application/alertmanager/config:ro
+      - ${CURR_PATH}/configuration/prometheus/alerts:/var/application/prometheus/config/alerts:ro
+      - ${CURR_PATH}/data/system_ota:/data/system_ota
     environment:
       - REDIS_HOST=${VIP}
       - REDIS_PORT=${REDIS_FRONTEND_PORT}
       - POSTGRESQL_HOST=${VIP}
       - MQTT_BROKER_HOST=emqx
       - MQTT_BROKER_PORT=${EMQX_PORT}
+      - CHIRPSTACK_PGDUMP_RUNNER_URL=http://host.docker.internal:8081/pg_dump
+      - CHIRPSTACK_PGRESTORE_RUNNER_URL=http://host.docker.internal:8081/pg_restore
+    # backup-runner now lives in the basic monitoring stack; reach it via the host.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports:
-      - target: 8080	
+      - target: ${CHIRPSTACK_PORT}
         published: ${CHIRPSTACK_PORT}
         protocol: tcp
+      - target: 9091
+        published: 9091
+        protocol: tcp
+        mode: host
     networks:
       - lorawan-net
 
-  chirpstack-gateway-bridge-basicstation:
+  chirpstack-gateway-bridge-basicstation-na:
     image: chirpstack/chirpstack-gateway-bridge:4
+    restart: unless-stopped
     command: -c /etc/chirpstack-gateway-bridge/chirpstack-gateway-bridge-basicstation-us915_1.toml
-    deploy:
-      mode: global
     ports:
       - target: 3001
-        published: ${CHIRPSTACK_GATEWAY_BRIDGE_PORT}
+        published: ${CHIRPSTACK_GATEWAY_BRIDGE_PORT:-3001}   # 保留默认值
         protocol: tcp
+        # mode: ingress   # 默认就是 ingress，可省略
     volumes:
-      - ${CURR_PATH}/configuration/chirpstack-gateway-bridge:/etc/chirpstack-gateway-bridge
+      - ./configuration/chirpstack-gateway-bridge:/etc/chirpstack-gateway-bridge
+    depends_on:
+      - emqx
     networks:
       - lorawan-net
+    deploy:
+      mode: global
+      resources:
+        limits:
+          cpus: '1'
+          memory: 128M
+
+  chirpstack-gateway-bridge-basicstation-eu:
+    image: chirpstack/chirpstack-gateway-bridge:4
+    restart: unless-stopped
+    command: -c /etc/chirpstack-gateway-bridge/chirpstack-gateway-bridge-basicstation-eu868.toml
+    ports:
+      - target: 3001
+        published: 3031
+        protocol: tcp
+    volumes:
+      - ./configuration/chirpstack-gateway-bridge:/etc/chirpstack-gateway-bridge
+    depends_on:
+      - emqx
+    networks:
+      - lorawan-net
+    deploy:
+      mode: global
+      resources:
+        limits:
+          cpus: '1'
+          memory: 128M
 
   chirpstack-rest-api:
     image: chirpstack/chirpstack-rest-api:4
-    command: --server chirpstack:8080 --bind 0.0.0.0:8090 --insecure
+    command: --server chirpstack:${CHIRPSTACK_PORT} --bind 0.0.0.0:${CHIRPSTACK_REST_API_PORT} --insecure
     deploy:
       mode: global
     ports:
-      - target: 8090
+      - target: ${CHIRPSTACK_REST_API_PORT}
         published: ${CHIRPSTACK_REST_API_PORT}
         protocol: tcp
     networks:
@@ -144,9 +189,9 @@ services:
       - PGPASSWORD=chirpstack
       - PGDATABASE=chirpstack
     ports:
-      - "${POSTGRES_PORT}:5432"
-      - "${REDIS_FRONTEND_PORT}:6379"
-      - "${HAPROXY_PORT}:9000"
+      - "${POSTGRES_PORT}:${POSTGRES_PORT}"
+      - "${REDIS_FRONTEND_PORT}:${REDIS_FRONTEND_PORT}"
+      - "${HAPROXY_PORT}:${HAPROXY_PORT}"
     networks:
       - lorawan-net
 
@@ -163,7 +208,7 @@ services:
       - source: redis-0-conf
         target: /etc/redis/redis.conf
     ports:
-      - target: 6379
+      - target: ${REDIS_PORT}
         published: ${REDIS_PORT}
         protocol: tcp
         mode: host
@@ -185,7 +230,7 @@ services:
       - source: redis-1-conf
         target: /etc/redis/redis.conf
     ports:
-      - target: 6379
+      - target: ${REDIS_PORT}
         published: ${REDIS_PORT}
         protocol: tcp
         mode: host
@@ -207,7 +252,7 @@ services:
       - source: redis-2-conf
         target: /etc/redis/redis.conf
     ports:
-      - target: 6379
+      - target: ${REDIS_PORT}
         published: ${REDIS_PORT}
         protocol: tcp
         mode: host
@@ -234,7 +279,7 @@ services:
       - source: sentinel-0-conf
         target: /etc/redis/sentinel.conf
     ports:
-      - target: 26379
+      - target: ${REDIS_SENTINEL_PORT}
         published: ${REDIS_SENTINEL_PORT}
         protocol: tcp
         mode: host
@@ -259,7 +304,7 @@ services:
       - source: sentinel-1-conf
         target: /etc/redis/sentinel.conf
     ports:
-      - target: 26379
+      - target: ${REDIS_SENTINEL_PORT}
         published: ${REDIS_SENTINEL_PORT}
         protocol: tcp
         mode: host
@@ -284,7 +329,7 @@ services:
       - source: sentinel-2-conf
         target: /etc/redis/sentinel.conf
     ports:
-      - target: 26379
+      - target: ${REDIS_SENTINEL_PORT}
         published: ${REDIS_SENTINEL_PORT}
         protocol: tcp
         mode: host
@@ -306,11 +351,11 @@ services:
       - EMQX_CLUSTER__DNS__NAME=tasks.emqx
       - EMQX_NODE__COOKIE=secretcookie
     ports:
-      - target: 1883
+      - target: ${EMQX_PORT}
         published: ${EMQX_PORT}
         protocol: tcp
         mode: host
-      - target: 18083
+      - target: ${EMQX_WEB_PORT}
         published: ${EMQX_WEB_PORT}
         protocol: tcp
         mode: host

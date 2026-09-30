@@ -1,10 +1,8 @@
 services:
   chirpstack:
-    image: leedarson/cartsbl:${ARCH}-v1.8.4
+    image: leedarson/cartsbl:${ARCH}-v2.16.0
     user: "1000:1000"
     command: -c /etc/chirpstack
-    deploy:
-      mode: global
     volumes:
       - ${CURR_PATH}/configuration/chirpstack:/etc/chirpstack
       # Backup dir shared with backup-runner (UI writes dumps here; runner reads/writes too).
@@ -19,7 +17,7 @@ services:
       - REDIS_HOST=${VIP}
       - REDIS_PORT=${REDIS_FRONTEND_PORT}
       - POSTGRESQL_HOST=${VIP}
-      - MQTT_BROKER_HOST=emqx
+      - MQTT_BROKER_HOST=host.docker.internal
       - MQTT_BROKER_PORT=${EMQX_PORT}
       - CHIRPSTACK_PGDUMP_RUNNER_URL=http://host.docker.internal:8081/pg_dump
       - CHIRPSTACK_PGRESTORE_RUNNER_URL=http://host.docker.internal:8081/pg_restore
@@ -36,6 +34,12 @@ services:
         mode: host
     networks:
       - lorawan-net
+    deploy:
+      mode: global
+      resources:
+        limits:
+          cpus: '2'
+          memory: 512M
 
   chirpstack-gateway-bridge-basicstation-na:
     image: chirpstack/chirpstack-gateway-bridge:4
@@ -43,9 +47,12 @@ services:
     command: -c /etc/chirpstack-gateway-bridge/chirpstack-gateway-bridge-basicstation-us915_1.toml
     ports:
       - target: 3001
-        published: ${CHIRPSTACK_GATEWAY_BRIDGE_PORT:-3001}   # 保留默认值
+        published: ${CHIRPSTACK_GATEWAY_BRIDGE_PORT:-3001}
         protocol: tcp
-        # mode: ingress   # 默认就是 ingress，可省略
+        mode: host   # host mode: gateways reach ONLY the VIP-owning node's instance
+    # Local-broker connectivity (servers= tcp://host.docker.internal:1883 in the toml).
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - ./configuration/chirpstack-gateway-bridge:/etc/chirpstack-gateway-bridge
     depends_on:
@@ -67,6 +74,9 @@ services:
       - target: 3001
         published: 3031
         protocol: tcp
+        mode: host   # host mode: gateways reach ONLY the VIP-owning node's instance
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - ./configuration/chirpstack-gateway-bridge:/etc/chirpstack-gateway-bridge
     depends_on:
@@ -83,23 +93,21 @@ services:
   chirpstack-rest-api:
     image: chirpstack/chirpstack-rest-api:4
     command: --server chirpstack:${CHIRPSTACK_PORT} --bind 0.0.0.0:${CHIRPSTACK_REST_API_PORT} --insecure
-    deploy:
-      mode: global
     ports:
       - target: ${CHIRPSTACK_REST_API_PORT}
         published: ${CHIRPSTACK_REST_API_PORT}
         protocol: tcp
     networks:
       - lorawan-net
+    deploy:
+      mode: global
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
 
   postgres-node-0:
     image: bitnamilegacy/postgresql-repmgr:14.12.0
-    deploy:
-      mode: replicated
-      replicas: 1
-      placement:
-        constraints:
-          - node.labels.node.id == 1
     environment:
       - POSTGRESQL_POSTGRES_PASSWORD=chirpstack
       - POSTGRESQL_USERNAME=chirpstack
@@ -122,15 +130,19 @@ services:
       - ${CURR_PATH}/configuration/postgresql/initdb:/docker-entrypoint-initdb.d
     networks:
       - lorawan-net
-
-  postgres-node-1:
-    image: bitnamilegacy/postgresql-repmgr:14.12.0
     deploy:
       mode: replicated
       replicas: 1
       placement:
         constraints:
-          - node.labels.node.id == 2
+          - node.labels.node.id == 1
+      resources:
+        limits:
+          cpus: '1'
+          memory: 128M
+
+  postgres-node-1:
+    image: bitnamilegacy/postgresql-repmgr:14.12.0
     environment:
       - POSTGRESQL_POSTGRES_PASSWORD=chirpstack
       - POSTGRESQL_USERNAME=chirpstack
@@ -149,15 +161,19 @@ services:
       - ${CURR_PATH}/storage/postgresqldata-1:/bitnami/postgresql
     networks:
       - lorawan-net
-
-  postgres-node-2:
-    image: bitnamilegacy/postgresql-repmgr:14.12.0
     deploy:
       mode: replicated
       replicas: 1
       placement:
         constraints:
-          - node.labels.node.id == 3
+          - node.labels.node.id == 2
+      resources:
+        limits:
+          cpus: '1'
+          memory: 128M
+
+  postgres-node-2:
+    image: bitnamilegacy/postgresql-repmgr:14.12.0
     environment:
       - POSTGRESQL_POSTGRES_PASSWORD=chirpstack
       - POSTGRESQL_USERNAME=chirpstack
@@ -176,11 +192,19 @@ services:
       - ${CURR_PATH}/storage/postgresqldata-2:/bitnami/postgresql
     networks:
       - lorawan-net
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.labels.node.id == 3
+      resources:
+        limits:
+          cpus: '1'
+          memory: 128M
 
   haproxy:
     image: leedarson/haproxy:${ARCH}-V1.02.00
-    deploy:
-      mode: global
     configs:
       - source: haproxy-config
         target: /usr/local/etc/haproxy/haproxy.cfg
@@ -194,15 +218,16 @@ services:
       - "${HAPROXY_PORT}:${HAPROXY_PORT}"
     networks:
       - lorawan-net
+    deploy:
+      mode: global
+      resources:
+        limits:
+          cpus: '1'
+          memory: 128M
+
 
   redis-node-0:
     image: redis:7-alpine
-    deploy:
-      mode: replicated
-      replicas: 1
-      placement:
-        constraints:
-          - node.labels.node.id == 1
     command: ["redis-server", "/etc/redis/redis.conf"]
     configs:
       - source: redis-0-conf
@@ -216,15 +241,19 @@ services:
       - ${CURR_PATH}/storage/redisdata-0:/data
     networks:
       - lorawan-net
-
-  redis-node-1:
-    image: redis:7-alpine
     deploy:
       mode: replicated
       replicas: 1
       placement:
         constraints:
-          - node.labels.node.id == 2
+          - node.labels.node.id == 1
+      resources:
+        limits:
+          cpus: '1'
+          memory: 2048M
+
+  redis-node-1:
+    image: redis:7-alpine
     command: ["redis-server", "/etc/redis/redis.conf"]
     configs:
       - source: redis-1-conf
@@ -238,15 +267,19 @@ services:
       - ${CURR_PATH}/storage/redisdata-1:/data
     networks:
       - lorawan-net
-
-  redis-node-2:
-    image: redis:7-alpine
     deploy:
       mode: replicated
       replicas: 1
       placement:
         constraints:
-          - node.labels.node.id == 3
+          - node.labels.node.id == 2
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1024M
+
+  redis-node-2:
+    image: redis:7-alpine
     command: ["redis-server", "/etc/redis/redis.conf"]
     configs:
       - source: redis-2-conf
@@ -260,15 +293,19 @@ services:
       - ${CURR_PATH}/storage/redisdata-2:/data
     networks:
       - lorawan-net
-
-  redis-sentinel-0:
-    image: redis:7-alpine
     deploy:
       mode: replicated
       replicas: 1
       placement:
         constraints:
-          - node.labels.node.id == 1
+          - node.labels.node.id == 3
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1024M
+
+  redis-sentinel-0:
+    image: redis:7-alpine
     command:
     - sh
     - -c
@@ -285,15 +322,19 @@ services:
         mode: host
     networks:
       - lorawan-net
-
-  redis-sentinel-1:
-    image: redis:7-alpine
     deploy:
       mode: replicated
       replicas: 1
       placement:
         constraints:
-          - node.labels.node.id == 2
+          - node.labels.node.id == 1
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1024M
+
+  redis-sentinel-1:
+    image: redis:7-alpine
     command:
     - sh
     - -c
@@ -310,15 +351,19 @@ services:
         mode: host
     networks:
       - lorawan-net
-
-  redis-sentinel-2:
-    image: redis:7-alpine
     deploy:
       mode: replicated
       replicas: 1
       placement:
         constraints:
-          - node.labels.node.id == 3
+          - node.labels.node.id == 2
+      resources:
+        limits:
+          cpus: '1'
+          memory: 128M
+
+  redis-sentinel-2:
+    image: redis:7-alpine
     command:
     - sh
     - -c
@@ -335,21 +380,25 @@ services:
         mode: host
     networks:
       - lorawan-net
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.labels.node.id == 3
+      resources:
+        limits:
+          cpus: '1'
+          memory: 128M
 
   emqx:
     image: emqx/emqx:5.6.0
-    deploy:
-      mode: global
-      endpoint_mode: dnsrr
     environment:
       - EMQX_NAME:=emqx
       - EMQX_ALLOW_ANONYMOUS=true
       - EMQX_ZONE__EXTERNAL__ALLOW_ANONYMOUS=true
       - EMQX_DASHBOARD__DEFAULT_USERNAME=admin
       - EMQX_DASHBOARD__DEFAULT_PASSWORD=admin
-      - EMQX_CLUSTER__DISCOVERY_STRATEGY=dns
-      - EMQX_CLUSTER__DNS__NAME=tasks.emqx
-      - EMQX_NODE__COOKIE=secretcookie
     ports:
       - target: ${EMQX_PORT}
         published: ${EMQX_PORT}
@@ -361,6 +410,15 @@ services:
         mode: host
     networks:
       - lorawan-net
+    deploy:
+      mode: global
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
+
+volumes:
+  chirpstack-command-logs:
 
 configs:
   haproxy-config:

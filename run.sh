@@ -580,7 +580,7 @@ function pull_image()
     list="
 ${keepalived_img}
 portainer/portainer-ce:latest
-leedarson/cartsbl:${arch}-v1.8.4
+leedarson/cartsbl:${arch}-v2.15.01
 chirpstack/chirpstack-gateway-bridge:4
 chirpstack/chirpstack-rest-api:4
 bitnamilegacy/postgresql-repmgr:14.12.0

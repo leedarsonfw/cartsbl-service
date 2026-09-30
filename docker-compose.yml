@@ -16,7 +16,7 @@ services:
     command: ["sh /src/compose-data-init.sh"]
 
   chirpstack:
-    image: leedarson/cartsbl:${ARCH}-v2.16.0
+    image: leedarson/cartsbl:${ARCH}-v2.16.1
     user: "1000:1000"
     command: -c /etc/chirpstack
     restart: unless-stopped
@@ -89,6 +89,8 @@ services:
       - emqx
     networks:
       - monitor-net
+    extra_hosts:
+      - "host.docker.internal=host-gateway"
     deploy:
       resources:
         limits:
@@ -107,6 +109,8 @@ services:
       - emqx
     networks:
       - monitor-net
+    extra_hosts:
+      - "host.docker.internal=host-gateway"
     deploy:
       resources:
         limits:
@@ -128,7 +132,7 @@ services:
           memory: 512M
 
   postgres:
-    image: postgres:14-alpine
+    image: postgres:14-alpine3.21
     restart: unless-stopped
     volumes:
       - ./configuration/postgresql/initdb:/docker-entrypoint-initdb.d
@@ -159,7 +163,7 @@ services:
       resources:
         limits:
           cpus: '1'
-          memory: 128M
+          memory: 1024M
 
     networks:
       - monitor-net

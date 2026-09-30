@@ -9,7 +9,7 @@ log_json=false
 marshaler="json"
 
 [integration.mqtt.auth.generic]
-servers=["tcp://emqx:1883"]
+servers=["tcp://host.docker.internal:1883"]
 username=""
 password=""
 

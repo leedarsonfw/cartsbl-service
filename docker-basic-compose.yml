@@ -3,7 +3,7 @@
 # Init uses postgres:14-alpine (already pulled with main stack) to avoid pulling alpine in offline env.
 services:
   basic-data-init:
-    image: postgres:14-alpine
+    image: postgres:14-alpine3.21
     user: "0:0"
     restart: "no"
     # Use host network namespace so /sys/class/net and /proc/net/route match the device (no run.sh).
